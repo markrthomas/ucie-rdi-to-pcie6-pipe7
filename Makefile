@@ -110,8 +110,8 @@ verilator_ctrl:
 	@echo "========== Verilator control-plane smoke (PhyStatus-gated FSM) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
 	rm -rf $(CTRL_DIR)
-	$(VERILATOR) --binary --timing -Wall -Isrc \
-		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-DECLFILENAME -Wno-PROCASSINIT \
+	$(VERILATOR) --binary --timing -Isrc \
+		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
 		--top-module $(CTRL_TOP) --Mdir $(CTRL_DIR) -o ctrl_sim $(CTRL_FILES)
 	@echo "Running Verilator control-plane smoke..."
 	./$(CTRL_DIR)/ctrl_sim

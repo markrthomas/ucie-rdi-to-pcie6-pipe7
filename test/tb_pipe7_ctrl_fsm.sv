@@ -17,21 +17,24 @@
 module tb_pipe7_ctrl_fsm;
     import pipe7_pkg::*;
 
-    logic pclk = 1'b0;
-    logic reset_n = 1'b0;
+    // Clock: initialized in its own initial (no declaration initializer, so no
+    // PROCASSINIT -- keeps the build portable across Verilator versions in CI).
+    logic pclk;
+    logic reset_n;
+    initial pclk = 1'b0;
     always #5 pclk = ~pclk;
 
-    int errors     = 0;
-    int comp_ok    = 0;   // legal requests that completed (done)
-    int err_ok     = 0;   // illegal requests that were rejected (req_error)
+    int errors;
+    int comp_ok;   // legal requests that completed (done)
+    int err_ok;    // illegal requests that were rejected (req_error)
 
     // ---------------- Output-mode DUT (primary) ----------------
-    logic       req_valid = 1'b0;
-    ctrl_req_e  req_kind  = REQ_POWER;
-    logic [3:0] req_power_down = PD_P0;
-    logic [3:0] req_rate       = RATE_GEN5;
-    logic [2:0] req_width      = W_160;
-    logic [2:0] req_rxwidth    = W_160;
+    logic       req_valid;
+    ctrl_req_e  req_kind;
+    logic [3:0] req_power_down;
+    logic [3:0] req_rate;
+    logic [2:0] req_width;
+    logic [2:0] req_rxwidth;
     logic       busy, done, req_error;
     logic [3:0] power_down, rate, tx_elec_idle;
     logic [2:0] width, rx_width;
@@ -53,12 +56,12 @@ module tb_pipe7_ctrl_fsm;
     );
 
     // ---------------- Input-mode DUT (secondary, PCLK-as-PHY-input) ----------------
-    logic       i_req_valid = 1'b0;
-    ctrl_req_e  i_req_kind  = REQ_RATE;
-    logic [3:0] i_req_power_down = PD_P0;
-    logic [3:0] i_req_rate       = RATE_GEN5;
-    logic [2:0] i_req_width      = W_160;
-    logic [2:0] i_req_rxwidth    = W_160;
+    logic       i_req_valid;
+    ctrl_req_e  i_req_kind;
+    logic [3:0] i_req_power_down;
+    logic [3:0] i_req_rate;
+    logic [2:0] i_req_width;
+    logic [2:0] i_req_rxwidth;
     logic       i_busy, i_done, i_req_error;
     logic [3:0] i_power_down, i_rate, i_tx_elec_idle;
     logic [2:0] i_width, i_rx_width;
@@ -128,6 +131,13 @@ module tb_pipe7_ctrl_fsm;
 
     // ---------------- Stimulus ----------------
     initial begin
+        // Initial values set here (not at declaration) to avoid PROCASSINIT.
+        errors = 0; comp_ok = 0; err_ok = 0;
+        req_valid = 1'b0; req_kind = REQ_POWER; req_power_down = PD_P0;
+        req_rate = RATE_GEN5; req_width = W_160; req_rxwidth = W_160;
+        i_req_valid = 1'b0; i_req_kind = REQ_RATE; i_req_power_down = PD_P0;
+        i_req_rate = RATE_GEN5; i_req_width = W_160; i_req_rxwidth = W_160;
+
         reset_n = 1'b0;
         repeat (4) @(negedge pclk);
         reset_n = 1'b1;
