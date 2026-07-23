@@ -63,28 +63,51 @@ Control plane (shared): PIPE LTSSM-adjacent MAC state:
 | `pipe7_pkg.sv` | Params, rate/power/width enums, message-bus opcode/addr constants | New (analogous to centralizing constants) |
 
 ### Signal set the bridge OWNS (MAC → PHY, must drive)
-- **Tx data (SerDes arch):** `TxData`, `TxDataValid`, `TxStartBlock`, `TxSyncHeader`
-  (no `TxDataK` in Gen6 flit mode; 128b/130b uses sync header at Gen5).
-- **Tx control:** `TxElecIdle`, `TxDetectRx/Loopback`, `TxCompliance`/margin.
-- **Command/config:** `PowerDown[1:0]`, `Rate` (Gen5/Gen6 encodings), `Width`, `Reset#`.
-- **Message-bus master:** `M2P` transactions (eq presets, margining, precoding enable).
+> Corrected per item 0 for the SerDes architecture (crosscheck §E).
+- **Tx data (SerDes arch):** `TxData[N-1:0]` (N ∈ {10,20,40,80,160}, set by `Width`),
+  `TxDataValid`. **No** `TxStartBlock`/`TxSyncHeader`/`TxDataK` — those are Original-PIPE
+  -only; in SerDes the MAC does the 128b/130b coding and embeds the 2b sync header in
+  `TxData` itself. At Gen6 (64 GT/s) there is no 128b/130b sync header at all.
+- **Tx control:** `TxElecIdle[3:0]`, `TxDetectRx/Loopback` (loopback N/A in SerDes — we
+  drive it only for receiver-detect). Tx margin/compliance are **msg-bus registers** in
+  SerDes, not discrete pins.
+- **Command/config:** `PowerDown[3:0]`, `Rate[3:0]` (Gen5=`4`, Gen6=`5`), `Width[2:0]`,
+  `RxWidth[2:0]`, `Reset#` (active-low, async).
+- **Message-bus master:** `M2P_MessageBus[7:0]` transactions (Tx eq presets/de-emphasis
+  in PHY Tx Control regs, Rx margining, `PAM4RestrictedLevels`). No FEC register exists.
 
 ### Signal set the bridge SAMPLES + reacts to (PHY → MAC)
-- **Rx data:** `RxData`, `RxValid`, `RxStartBlock`, `RxSyncHeader`, `RxStatus`.
-- **`PhyStatus`** — completion handshake for **every** power/rate/width change (the
-  central constraint on the control FSM; the predecessor has no equivalent).
-- `RxElecIdle`, `RxStandbyStatus`, `P2M` message-bus responses.
+> Corrected per item 0 for the SerDes architecture (crosscheck §F).
+- **Rx data:** `RxData[N-1:0]` synchronous to the recovered clock **`RxCLK`** (not PCLK),
+  `RxValid` (in SerDes = "RxCLK stable", not block-aligned). **No** `RxStartBlock`/
+  `RxSyncHeader` (Original-PIPE-only) — the MAC recovers block start / decodes the sync
+  header out of `RxData`. `RxStatus[2:0]` — only `0b011` "Receiver detected" applies in
+  SerDes; SKP/decode/EB-error codes are Original-PIPE-only (EB lives in the MAC).
+- **`PhyStatus`** — single-cycle completion for power/rate/width changes (async when PCLK
+  is absent). Rate/Width change only in **P0 or P1** with `TxElecIdle` asserted. Completion
+  latency is **PHY-specific** (parameterize the item-7 assertion). In PCLK-as-PHY-input
+  mode add the `PclkChangeOk`→`PclkChangeAck` handshake.
+- `RxElecIdle` (async; at Gen5/Gen6 the MAC must detect EI-*entry* with its own logic,
+  not trust this pin), `RxStandbyStatus`, `P2M_MessageBus[7:0]` responses.
 
 ### PIPE-7.1-specific deltas built in from day one
-- **FLIT mode** at Gen6 (fixed 256B flits; block/sync-header semantics differ from 130b).
-  This replaces the predecessor's "zero-extend RDI into upper PIPE bits" mapping, which
-  **cannot** survive flit framing.
-- **New Rate encoding** for 64 GT/s and its `PhyStatus`/PCLK-rate-change timing.
-- **L0p** (partial-width low-power L0) → extra `Width` handshake states.
-- **PAM4 precoding**: PHY does the mapping; MAC only **configures** it via message-bus
-  register (kept cheap precisely because we are MAC-facing).
-- **FEC / flit-LCRC** live on the **controller/RDI** side, not the PHY interface — the
-  bridge sizes the datapath for them but does not implement the codec here.
+> Reconciled with the spec in item 0 (crosscheck §B/§C/§I).
+- **Gen6 at the PIPE interface is *not* "FLIT mode".** "Flit" is a PCIe-base concept above
+  PIPE (0 occurrences in PIPE 7.1). At 64 GT/s (`Rate=5`) the datapath is wider `TxData`/
+  `RxData` with **no** 128b/130b sync header; the 256B flit + FEC + LCRC are built
+  controller-side and arrive on RDI. The bridge does **not** frame flits on the PIPE side.
+  (This still replaces the predecessor's zero-extend mapping, which cannot carry real
+  block/flit-formatted data.)
+- **New Rate encoding**: `Rate[3:0]`, Gen5=`4` (32 GT/s), Gen6=`5` (64 GT/s); each rate
+  change completes via a single-cycle `PhyStatus` (+ optional PCLK handshake).
+- **L0p** is realized by an ordinary `Width`/`RxWidth` change using the standard
+  rate/width→`PhyStatus` handshake — **no** dedicated L0p PIPE handshake or "partial
+  width" pins exist.
+- **PAM4 precoding**: PHY does the mapping/gray-code/precode; the MAC's only PAM4 register
+  knob is `PAM4RestrictedLevels` (there is no generic "precoding-enable" register).
+- **FEC / flit-LCRC** live on the **controller/RDI** side; the PIPE interface has **no FEC
+  signalling or register** — the bridge sizes the RDI datapath for them but nothing FEC
+  crosses the PIPE boundary.
 
 ---
 
@@ -176,12 +199,23 @@ Vendor flows (`simv`/`questa`/`xsim`) compile `sim_top.sv`. CI runs `make regres
 > Each item is self-contained, lint-clean, and leaves `make regress` green. Advance one
 > per commit, matching the predecessor's closure-plan workflow.
 
-> **Provenance caveat:** the signal names, message-bus opcodes/addresses, flit sizing,
-> rate/power-state encodings, and PhyStatus timing used throughout this plan are from
-> working knowledge, **not** a reading of the official spec. Item 0 must reconcile them
-> against your controlled copy of the **Intel PIPE 7.1 specification** before any
-> interface or register detail is frozen (items 2+). Treat every concrete constant here
-> as a placeholder until item 0 confirms it.
+> **Provenance caveat — RESOLVED (2026-07-23).** The signal names, message-bus
+> opcodes/addresses, flit sizing, rate/power-state encodings, and PhyStatus timing were
+> originally working-knowledge placeholders. **Item 0 is now complete**: they were
+> reconciled against the official **Intel PIPE 7.1 spec (Ref 643108, Rev 7.1, Sep 2025)**
+> — see `docs/pipe71_spec_crosscheck.md` for the row-by-row verdicts. Corrections are
+> folded in below and in `src/pipe7_pkg.sv`. **Key deltas from the original plan:**
+> (a) Gen6 is **not** "FLIT mode" *at the PIPE interface* — "flit" is a PCIe-base concept
+> above PIPE (0 occurrences in PIPE 7.1); the bridge passes already-framed data as
+> `TxData`/`RxData`, it does not build 256B flits on the PIPE side.
+> (b) In the **SerDes architecture the MAC owns 128b/130b encode/decode + block
+> alignment** (PHY is parallel↔serial only), so `TxStartBlock`/`TxSyncHeader`/
+> `RxStartBlock`/`RxSyncHeader`/`TxDataK`/`RxDataK` **do not exist** on this interface.
+> (c) Field widths: `PowerDown[3:0]`, `Rate[3:0]` (Gen5=`4`, Gen6=`5`), `TxElecIdle[3:0]`,
+> `Width[2:0]` + separate `RxWidth[2:0]`; SerDes `TxData` is 10/20/40/80/160 bits.
+> (d) L0p is an ordinary `Width` change, not a special PIPE handshake; PhyStatus
+> completion latency is PHY-specific (parameterized), not a spec constant; there is **no
+> FEC register** on the PIPE interface.
 
 0. **Spec cross-check + errata sheet.** Obtain the controlled **PIPE 7.1** spec (and the
    relevant **PCIe 6.x base** sections for FLIT/PAM4/L0p). Produce
