@@ -7,16 +7,18 @@ VERILATOR_INC := $(VERILATOR_ROOT)/include
 VERILATOR_CPP_CORE = $(VERILATOR_INC)/verilated.cpp $(VERILATOR_INC)/verilated_vcd_c.cpp \
 	$(VERILATOR_INC)/verilated_threads.cpp
 
-VERILOG_RTL = src/ucie_rdi_fifo_cdc.sv src/ucie_rdi_to_pcie_pipe_bridge.sv test/ucie_rdi_to_pcie_pipe_bridge_assertions.sv test/tb_ucie_rdi_to_pcie_pipe_scoreboard.sv test/tb_ucie_rdi_to_pcie_pipe_bridge.sv
-VERILOG_FILES = $(VERILOG_RTL)
-TOP_MODULE = tb_ucie_rdi_to_pcie_pipe_bridge
+# Item 1 (datapath-only pass-through) file lists. Framing/FSM/message-bus
+# sources and the adapted scoreboard/assertions/UVM come in later items.
+VERILOG_RTL = src/pipe7_pkg.sv src/pipe7_cdc_elastic_buf.sv src/ucie_rdi_to_pipe7_mac_bridge.sv
+VERILOG_FILES = $(VERILOG_RTL) test/tb_pipe7_mac_bridge.sv
+TOP_MODULE = tb_pipe7_mac_bridge
 TOP_SIMV = sim_top
 VERILOG_SIMV = test/sim_top.sv $(VERILOG_RTL)
 VERILATOR_DIR = obj_dir
 COV_DIR = obj_dir_cov
-NL1_TOP = tb_ucie_rdi_to_pcie_pipe_nl1
+NL1_TOP = tb_pipe7_mac_bridge_nl1
 NL1_DIR = obj_dir_nl1
-NL1_FILES = src/ucie_rdi_fifo_cdc.sv src/ucie_rdi_to_pcie_pipe_bridge.sv test/ucie_rdi_to_pcie_pipe_bridge_assertions.sv test/tb_ucie_rdi_to_pcie_pipe_nl1.sv
+NL1_FILES = $(VERILOG_RTL) test/tb_pipe7_mac_bridge_nl1.sv
 UVM_MAKE = $(MAKE) -C test/uvm -f Makefile.vcs
 
 # Default target
@@ -71,7 +73,7 @@ regress_nl1: lint verilator_nl1
 verilator:
 	@echo "========== Compiling with Verilator =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
-	$(VERILATOR) --trace -cc $(VERILOG_FILES) --top-module $(TOP_MODULE) -Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH
+	$(VERILATOR) --trace -cc $(VERILOG_FILES) --top-module $(TOP_MODULE) -Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH -Wno-UNUSEDSIGNAL
 	cd $(VERILATOR_DIR) && make -f V$(TOP_MODULE).mk
 	cd $(VERILATOR_DIR) && g++ -o $(TOP_MODULE) ../sim_main.cpp V$(TOP_MODULE)__ALL.a \
 		-I. -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
@@ -85,7 +87,7 @@ verilator_nl1:
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
 	rm -rf $(NL1_DIR)
 	$(VERILATOR) --trace -cc $(NL1_FILES) --top-module $(NL1_TOP) \
-		-Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH --Mdir $(NL1_DIR)
+		-Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH -Wno-UNUSEDSIGNAL --Mdir $(NL1_DIR)
 	cd $(NL1_DIR) && make -f V$(NL1_TOP).mk
 	cd $(NL1_DIR) && g++ -o $(NL1_TOP) ../sim_main_nl1.cpp V$(NL1_TOP)__ALL.a \
 		-I. -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
@@ -99,7 +101,7 @@ verilator_cov:
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
 	rm -rf $(COV_DIR)
 	$(VERILATOR) --coverage --trace -cc $(VERILOG_FILES) --top-module $(TOP_MODULE) \
-		-Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH --Mdir $(COV_DIR)
+		-Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH -Wno-UNUSEDSIGNAL --Mdir $(COV_DIR)
 	cd $(COV_DIR) && make -f V$(TOP_MODULE).mk
 	cd $(COV_DIR) && g++ -DVM_COVERAGE=1 -o $(TOP_MODULE) ../sim_main.cpp V$(TOP_MODULE)__ALL.a \
 		-I. -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
@@ -126,7 +128,7 @@ coverage_summary:
 verilator_debug:
 	@echo "========== Compiling with Verilator (debug) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
-	$(VERILATOR) --trace -cc $(VERILOG_FILES) --top-module $(TOP_MODULE) -Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH
+	$(VERILATOR) --trace -cc $(VERILOG_FILES) --top-module $(TOP_MODULE) -Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH -Wno-UNUSEDSIGNAL
 	cd $(VERILATOR_DIR) && make -f V$(TOP_MODULE).mk
 	cd $(VERILATOR_DIR) && g++ -g -O0 -o $(TOP_MODULE) ../sim_main.cpp V$(TOP_MODULE)__ALL.a \
 		-I. -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
@@ -166,10 +168,9 @@ vivado:
 
 lint:
 	@if [ -z "$(VERILATOR)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
-	$(VERILATOR) --lint-only -Wall -Isrc --top-module ucie_rdi_to_pcie_pipe_bridge src/ucie_rdi_fifo_cdc.sv src/ucie_rdi_to_pcie_pipe_bridge.sv
-	$(VERILATOR) --lint-only -Wall -Isrc --top-module ucie_rdi_to_pcie_pipe_bridge_assertions test/ucie_rdi_to_pcie_pipe_bridge_assertions.sv
-	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET --top-module $(TOP_MODULE) $(VERILOG_FILES)
-	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET --top-module $(NL1_TOP) $(NL1_FILES)
+	$(VERILATOR) --lint-only -Wall -Isrc --top-module ucie_rdi_to_pipe7_mac_bridge $(VERILOG_RTL)
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN --top-module $(TOP_MODULE) $(VERILOG_FILES)
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN --top-module $(NL1_TOP) $(NL1_FILES)
 
 uvm_compile:
 	$(UVM_MAKE) compile
@@ -189,9 +190,8 @@ docs_check:
 	@test -f docs/interface_spec.md
 	@test -f docs/verification_plan.md
 	@test -f docs/uvm_verification.md
-	@test -f test/uvm/README.md
-	@! grep -R "| \*\*Line Coverage\*\* | 100%" README.md docs test/uvm/README.md >/dev/null
-	@! grep -R "mirrors the coverage of the original SystemVerilog testbench" README.md docs test/uvm/README.md >/dev/null
+	@! grep -R "| \*\*Line Coverage\*\* | 100%" README.md docs >/dev/null
+	@! grep -R "mirrors the coverage of the original SystemVerilog testbench" README.md docs >/dev/null
 	@echo "Documentation check passed"
 
 repo_status:

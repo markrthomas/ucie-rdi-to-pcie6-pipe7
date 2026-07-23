@@ -2,10 +2,17 @@
 `timescale 1ns/1ps
 
 /**
- * Parameterized Dual-Clock FIFO with Gray-coded CDC and stable output registers.
- * Designed for UCIe RDI and PCIe PIPE clock domain crossing.
+ * pipe7_cdc_elastic_buf -- parameterized dual-clock elastic buffer with
+ * Gray-coded pointer CDC and stable registered outputs.
+ *
+ * Ported from the predecessor `ucie_rdi_fifo_cdc` (proven + formally checked).
+ * Crosses the RDI clock domain and the PIPE PCLK domain in either direction:
+ *   - TX path: wr = RDI domain, rd = PCLK domain
+ *   - RX path: wr = PCLK domain, rd = RDI domain
+ * The module itself is domain-agnostic; the instantiating bridge assigns
+ * wr_clk / rd_clk to rdi_clk / pclk as appropriate.
  */
-module ucie_rdi_fifo_cdc #(
+module pipe7_cdc_elastic_buf #(
     parameter int INPUT_DATA_WIDTH  = 16,
     parameter int OUTPUT_DATA_WIDTH = 32,
     parameter int BUFFER_DEPTH      = 16
@@ -14,14 +21,14 @@ module ucie_rdi_fifo_cdc #(
     input  logic                          rd_clk,
     input  logic                          rst_n,
 
-    // Write Domain (UCIe RDI TX side or PIPE RX side)
+    // Write domain
     input  logic                          wr_valid,
     output logic                          wr_ready,
     input  logic [INPUT_DATA_WIDTH-1:0]   wr_data,
     input  logic                          wr_error,
     output logic                          wr_full,
 
-    // Read Domain (PIPE TX side or UCIe RDI RX side)
+    // Read domain
     output logic                          rd_valid,
     input  logic                          rd_ready,
     output logic [OUTPUT_DATA_WIDTH-1:0]  rd_data,
