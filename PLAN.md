@@ -146,21 +146,23 @@ Control plane (shared): PIPE LTSSM-adjacent MAC state:
 │   │   ├── pipe7_mac_pkg.sv              # agents/drivers/monitors/scoreboard/coverage
 │   │   ├── seq_lib/pipe7_seq_lib.sv
 │   │   └── uvm_test_top.sv
-│   └── cocotb/                           # Tier 1b: Python parallel cross-check (runnable)
+│   └── cocotb/                           # Tier 1b: PyUVM-on-Cocotb cross-check (runnable)
 │       ├── Makefile                      # cocotb flow; SIM=verilator (default) | icarus
 │       ├── README.md
-│       ├── requirements.txt              # cocotb (+ cocotb-coverage) pins
-│       ├── conftest.py                   # test discovery / seed plumbing
-│       ├── models/                       # independent Python reference models
+│       ├── requirements.txt              # pyuvm, cocotb, cocotb-coverage pins
+│       ├── pipe7_pyuvm_env.py            # uvm_env: agents + scoreboard + analysis ports
+│       ├── agents/                       # PyUVM agents (sequencer/driver/monitor)
+│       │   ├── ucie_rdi_agent.py         # active RDI agent
+│       │   └── phy_responder_agent.py    # PyUVM PHY-responder (mirrors UVM BFM)
+│       ├── seq_lib/pipe7_seq_lib.py      # uvm_sequence library (shared test intent w/ UVM)
+│       ├── models/                       # independent Python reference models (scoreboard logic)
 │       │   ├── framing_model.py          # RDI ↔ 130b/Gen6 wide-data round-trip
 │       │   ├── ctrl_plane_model.py       # PowerDown/Rate/Width → PhyStatus legality
 │       │   └── msgbus_model.py           # M2P/P2M framing + 12-bit register model
-│       ├── bfm/
-│       │   └── phy_responder.py          # Python PHY-responder (mirrors UVM BFM)
 │       ├── vectors/                      # shared golden stimulus+expected (cross-check mode 1)
-│       ├── test_datapath.py              # datapath / framing cross-check
-│       ├── test_ctrl_plane.py            # control-plane cross-check
-│       └── test_msgbus.py                # message-bus cross-check
+│       ├── test_datapath.py              # uvm_test: datapath / framing cross-check
+│       ├── test_ctrl_plane.py            # uvm_test: control-plane cross-check
+│       └── test_msgbus.py                # uvm_test: message-bus cross-check
 ├── docs/
 │   ├── architecture.md
 │   ├── interface_spec.md                 # PIPE 7.1 MAC integration contract
@@ -176,13 +178,24 @@ Control plane (shared): PIPE LTSSM-adjacent MAC state:
 ## DV environment (three-tier model)
 
 > Extends the predecessor's two-tier model with a **third, independent, open-source-runnable
-> tier (Cocotb)** whose sole job is to **cross-check** the SV/Verilator and UVM
-> environments. The value is *methodological diversity*: a Python reference model authored
-> independently from the SystemVerilog scoreboard makes a **common-mode modelling bug**
-> (the same wrong assumption baked into both DUT and its SV checker) far less likely to pass
-> silently. When Tier 1 and Tier 1b agree with the DUT, confidence is high; when they
-> disagree, exactly one of the three (DUT, SV TB, Python TB) has the bug — and we know to
-> look.
+> tier: a PyUVM environment on Cocotb** whose sole job is to **cross-check** the SV/Verilator
+> and UVM environments. The value is *independent-implementation diversity*: a reference model
+> and checker written independently — in Python, on a different simulator — makes a
+> **common-mode modelling bug** (the same wrong assumption baked into both DUT and its SV
+> checker) far less likely to pass silently. When Tier 1 and Tier 1b agree with the DUT,
+> confidence is high; when they disagree, exactly one of the three (DUT, SV TB, Python TB) has
+> the bug — and we know to look.
+>
+> **Why PyUVM specifically (not raw cocotb coroutines):** PyUVM is UVM 1.2 implemented in
+> Python on top of cocotb — same component taxonomy as our Tier-2 SV/UVM env (uvm_test / env /
+> agent / driver / monitor / sequencer / sequence / scoreboard, the factory, and ConfigDB /
+> TLM analysis ports). Mirroring the UVM structure lets the two envs **share *test intent* and
+> sequence/scoreboard architecture 1:1**, so a Tier-2 UVM sequence has a direct PyUVM
+> counterpart and divergences are easy to localize. The diversity that catches common-mode
+> bugs is preserved where it matters — **independent language, independent reference-model
+> implementation, independent simulator** — while the methodology is deliberately kept
+> *aligned* with UVM so the cross-check compares like-for-like. (Constraints use Python
+> `random`/`constraint` libs, not SV constraint blocks; coverage via `cocotb-coverage`.)
 
 **Tier 1 — Verilator open-source CI gate** (fast, always-run):
 - Smoke TB + reference scoreboard + assertion monitor, clocks from `sim_main.cpp`.
@@ -191,30 +204,36 @@ Control plane (shared): PIPE LTSSM-adjacent MAC state:
 - A **lightweight PHY-responder stub** (SV, non-UVM) that answers `PhyStatus`, returns
   `RxStatus`/`RxData`, and services message-bus reads — enough to exercise the FSM.
 
-**Tier 1b — Cocotb parallel cross-check (Python, open-source, *runnable* in this env):**
-- Runs on **Verilator (preferred) or Icarus** — both already on PATH via oss-cad-suite — so
-  unlike UVM (Tier 2) this tier **actually executes** in OSS CI, giving a *second* runnable
-  gate rather than an authored-only one. (SV-feature caveat: package/interface/`always_ff`
-  support is stronger under cocotb+Verilator than under Icarus; the framer/msgbus DUTs are
-  validated against Verilator first.)
-- **Independent Python reference models**, deliberately not ported from the SV scoreboard:
+**Tier 1b — PyUVM-on-Cocotb parallel cross-check (Python, open-source, *runnable* in this env):**
+- Built with **PyUVM** (UVM 1.2 in Python) driving the DUT via **Cocotb** on **Verilator
+  (preferred) or Icarus** — both already on PATH via oss-cad-suite — so unlike UVM (Tier 2)
+  this tier **actually executes** in OSS CI, giving a *second* runnable gate rather than an
+  authored-only one. (SV-feature caveat: package/interface/`always_ff` support is stronger
+  under cocotb+Verilator than under Icarus; the framer/msgbus DUTs are validated against
+  Verilator first.)
+- **PyUVM env structure (mirrors the Tier-2 UVM taxonomy):** `uvm_test` → `uvm_env` holding a
+  `ucie_rdi_agent` (sequencer/driver/monitor, active) and a `pipe7_phy_responder_agent`
+  (PHY-side responder), a `uvm_scoreboard` fed over `uvm_analysis_port`s, and a `pipe7_seq_lib`
+  of `uvm_sequence`s. Wiring via the PyUVM **factory** + **ConfigDB**.
+- **Independent Python reference models** (the checker logic behind the scoreboard),
+  deliberately *not* ported from the SV scoreboard:
   - a payload/framing model (RDI ↔ 128b/130b Gen5 & Gen6 wide-data round-trip),
   - a control-plane model (legal `PowerDown`/`Rate`/`Width` → single-cycle `PhyStatus`
     completion; illegal transitions flagged),
   - a message-bus transactor + register model (M2P/P2M framing, opcode set, 12-bit addr).
 - **Cross-check mechanism (two modes):**
-  1. *Shared golden vectors* — the SV smoke TB and the cocotb TB consume the **same**
+  1. *Shared golden vectors* — the SV smoke TB and the PyUVM sequences consume the **same**
      exported stimulus+expected vector set; a divergence between the two reference models on
      identical stimulus localizes a TB bug independently of the DUT.
-  2. *Independent constrained-random* — cocotb drives its own seeded CRT stimulus through its
-     Python model, then the same seed/vectors are exportable for the SV/UVM env for
-     back-to-back comparison.
-- **A Python PHY-responder** mirroring the SV/UVM `pipe7_phy_responder_agent` behaviour
+  2. *Independent constrained-random* — PyUVM sequences drive their own seeded CRT stimulus
+     (Python `constraint`/`random`) through the Python model, then the same seed/vectors are
+     exportable for the SV/UVM env for back-to-back comparison.
+- **A PyUVM PHY-responder agent** mirroring the SV/UVM `pipe7_phy_responder_agent` behaviour
   (spec-timed `PhyStatus`/`RxStatus`/`P2M`), so the control-plane proof is corroborated by an
-  independently-authored responder.
-- **Coverage parity check:** cocotb functional coverage (`cocotb-coverage` or a lightweight
-  in-tree collector) compared against the SV/UVM covergroup bins to catch coverage-model
-  divergence (a bin one env counts and the other silently doesn't).
+  independently-authored responder with the same component role.
+- **Coverage parity check:** PyUVM functional coverage (`cocotb-coverage`) compared against the
+  SV/UVM covergroup bins to catch coverage-model divergence (a bin one env counts and the other
+  silently doesn't).
 - **Explicit non-goals:** does **not** replace the Verilator smoke gate or UVM; it is a
   corroboration layer. Introduced as an *advisory* CI job (`continue-on-error`) and promoted
   to a hard gate once green and stable.
@@ -243,7 +262,7 @@ PowerDown state; no Tx data while `TxElecIdle`).
 
 Makefile target set to replicate: `lint`, `regress` (lint + Verilator smoke = CI gate),
 `regress_cov`, `regress_nl1`, `coverage_summary`, `ci` (regress + cov + nl1 + docs_check),
-`cocotb` (Tier 1b Python cross-check; `SIM=verilator` default, `SIM=icarus` alt),
+`cocotb` (Tier 1b PyUVM-on-Cocotb cross-check; `SIM=verilator` default, `SIM=icarus` alt),
 `uvm`/`uvm_compile`/`uvm_run` (via `test/uvm/Makefile.vcs`), `formal`, `docs_check`, `clean`.
 Vendor flows (`simv`/`questa`/`xsim`) compile `sim_top.sv`. CI runs `make regress` then
 `verilator_cov` + `verilator_nl1`, matching `.github/workflows`. A separate **`cocotb`**
@@ -321,19 +340,22 @@ once stable — it must never block the Verilator release gate while being broug
 12. **Docs + coverage sign-off** — finalize `architecture.md`, `verification_plan.md`,
     `uvm_verification.md`; `docs_check` target; record line-coverage baseline. (If the
     Cocotb tier, items 13–14, lands after this, re-run the docs/coverage sign-off.)
-13. **Cocotb parallel cross-check — env + datapath.** Stand up `test/cocotb/` (Tier 1b):
-    `Makefile` (`SIM=verilator` default), an **independent** Python framing reference model
-    (`models/framing_model.py`), and `test_datapath.py` cross-checking the RDI↔PIPE payload
-    /framing round-trip against the SV scoreboard via **shared golden vectors**. Add the
-    advisory (`continue-on-error`) `cocotb` CI job. *Ordering:* schedulable any time after
-    item 5 (Gen5 framer) exists — does not depend on the UVM tier.
-14. **Cocotb cross-check — control plane, message bus, coverage parity.** Add the Python
-    PHY-responder (`bfm/phy_responder.py`), `ctrl_plane_model.py` + `test_ctrl_plane.py`
-    (every `PowerDown`/`Rate`/`Width` → `PhyStatus` completion; illegal transitions flagged),
-    `msgbus_model.py` + `test_msgbus.py` (M2P/P2M framing + register model), and a
-    coverage-parity check against the SV/UVM covergroup bins. Promote the `cocotb` CI job
-    from advisory to a required gate once green. *Ordering:* after items 3–4 (control FSM +
-    msgbus) and item 13.
+13. **PyUVM-on-Cocotb cross-check — env + datapath.** Stand up `test/cocotb/` (Tier 1b) as a
+    **PyUVM** env: `pipe7_pyuvm_env.py` (uvm_env + scoreboard + analysis ports), the active
+    `agents/ucie_rdi_agent.py`, an **independent** Python framing reference model
+    (`models/framing_model.py`), and `test_datapath.py` (a `uvm_test`) cross-checking the
+    RDI↔PIPE payload/framing round-trip against the SV scoreboard via **shared golden
+    vectors**. `Makefile` (`SIM=verilator` default) + advisory (`continue-on-error`) `cocotb`
+    CI job. *Ordering:* schedulable any time after item 5 (Gen5 framer) — does not depend on
+    the SV/UVM tier.
+14. **PyUVM cross-check — control plane, message bus, coverage parity.** Add the PyUVM
+    `agents/phy_responder_agent.py`, `ctrl_plane_model.py` + `test_ctrl_plane.py` (every
+    `PowerDown`/`Rate`/`Width` → `PhyStatus` completion; illegal transitions flagged),
+    `msgbus_model.py` + `test_msgbus.py` (M2P/P2M framing + register model), a
+    `seq_lib/pipe7_seq_lib.py` sharing test intent with the SV/UVM sequences, and a
+    `cocotb-coverage` parity check against the SV/UVM covergroup bins. Promote the `cocotb`
+    CI job from advisory to a required gate once green. *Ordering:* after items 3–4 (control
+    FSM + msgbus) and item 13.
 
 ---
 
@@ -353,11 +375,12 @@ once stable — it must never block the Verilator release gate while being broug
   zero-extend).
 - **UVM (VCS):** `make uvm` compiles + runs the sanity test; review-validate (this env is
   authored-not-run in the OSS environment, per the predecessor's convention).
-- **Cocotb cross-check (Tier 1b):** `make cocotb SIM=verilator` runs the Python reference
-  models against the same DUT. **Cross-check pass criterion:** on the shared golden vectors
-  the SV scoreboard and the Python model must agree with the DUT *and with each other*; any
-  three-way disagreement fails the job and localizes the bug to DUT vs SV-TB vs Python-TB.
-  Advisory in CI until stable, then a required gate. Runs in this OSS environment (unlike UVM).
+- **PyUVM cross-check (Tier 1b):** `make cocotb SIM=verilator` runs the PyUVM env (UVM 1.2 in
+  Python on cocotb) with its independent Python reference models against the same DUT.
+  **Cross-check pass criterion:** on the shared golden vectors the SV scoreboard and the PyUVM
+  scoreboard must agree with the DUT *and with each other*; any three-way disagreement fails
+  the job and localizes the bug to DUT vs SV-TB vs Python-TB. Advisory in CI until stable, then
+  a required gate. Runs in this OSS environment (unlike the VCS UVM tier).
 - **Formal:** `make formal` (SymbiYosys) for CDC-buf invariants + FSM safety props.
 
 ## Key reuse pointers (from predecessor repo)

@@ -28,21 +28,28 @@ GitHub Actions runs **`make regress`** on push/PR to `main` / `master`, then **`
 | Verilator smoke | Root `Makefile`, `test/tb_ucie_rdi_to_pcie_pipe_bridge.sv` | Verilator | Fast RTL lint, smoke stimulus, scoreboard, CRC lane-0 mirror, FIFO stress | Current CI/release gate |
 | NUM_LANES=1 smoke | Root `Makefile`, `test/tb_ucie_rdi_to_pcie_pipe_nl1.sv` | Verilator | Parameter-width smoke with assertion monitor | Current CI side gate |
 | UVM | `test/uvm/` | VCS/UVM 1.2 | TX-path UVM smoke, CDC assertions, and extensibility scaffold | Manual, not in open-source CI |
-| **Cocotb cross-check (Tier 1b)** | `test/cocotb/` | Verilator (default) / Icarus | *Planned (PLAN.md items 13–14).* Independent Python reference models (framing, control-plane, message-bus) + Python PHY-responder that **cross-check** the SV/UVM envs via shared golden vectors; coverage-parity check | Advisory OSS CI job (`continue-on-error`), promoted to gate once stable |
+| **PyUVM cross-check (Tier 1b)** | `test/cocotb/` | Verilator (default) / Icarus | *Planned (PLAN.md items 13–14).* **PyUVM** env (UVM 1.2 in Python on cocotb) with independent Python reference models (framing, control-plane, message-bus) + PyUVM PHY-responder agent that **cross-check** the SV/UVM envs via shared golden vectors; `cocotb-coverage` parity check | Advisory OSS CI job (`continue-on-error`), promoted to gate once stable |
 
 Detailed UVM architecture, component roles, sequence matrix, and closure gaps are documented in `docs/uvm_verification.md`.
 
-**Tier 1b — Cocotb parallel cross-check (planned).** A third, open-source-*runnable* tier
-whose job is methodological diversity: a Python reference model authored independently of the
-SystemVerilog scoreboard makes a common-mode modelling bug (the same wrong assumption in both
-DUT and its SV checker) far less likely to pass silently. It corroborates — it does not
-replace — the Verilator gate (Tier 1) or UVM (Tier 2). Cross-check works two ways: (1) shared
-golden stimulus+expected vectors consumed by both the SV TB and the cocotb TB, so a divergence
-between the two reference models on identical stimulus localizes a *TB* bug independent of the
-DUT; (2) independent seeded constrained-random in cocotb, with seeds/vectors exportable to the
-SV/UVM env for back-to-back comparison. Unlike UVM, this tier executes in this environment
-(cocotb + Verilator/Icarus, both on PATH). See PLAN.md "DV environment → Tier 1b" and closure
-items 13–14. This doc is finalized in item 12.
+**Tier 1b — PyUVM-on-Cocotb parallel cross-check (planned).** A third, open-source-*runnable*
+tier built with **PyUVM** (UVM 1.2 in Python, on cocotb). Its job is independent-implementation
+diversity: a reference model and scoreboard authored independently of the SystemVerilog env —
+in Python, on a different simulator — makes a common-mode modelling bug (the same wrong
+assumption in both DUT and its SV checker) far less likely to pass silently. Using PyUVM (not
+raw cocotb) keeps the component taxonomy — uvm_test/env/agent/driver/monitor/sequencer/
+sequence/scoreboard, factory, ConfigDB, TLM analysis ports — **aligned 1:1 with the Tier-2
+SV/UVM env**, so sequences and scoreboard architecture are shared as *test intent* and
+divergences compare like-for-like; the diversity that catches bugs (independent language,
+reference-model implementation, and simulator) is retained. It corroborates — it does not
+replace — the Verilator gate (Tier 1) or the VCS UVM tier (Tier 2). Cross-check works two ways:
+(1) shared golden stimulus+expected vectors consumed by both the SV TB and the PyUVM sequences,
+so a divergence between the two reference models on identical stimulus localizes a *TB* bug
+independent of the DUT; (2) independent seeded constrained-random in PyUVM (Python
+`constraint`/`random`), with seeds/vectors exportable to the SV/UVM env for back-to-back
+comparison. Unlike the VCS UVM tier, this executes in this environment (PyUVM + cocotb +
+Verilator/Icarus, all runnable here). See PLAN.md "DV environment → Tier 1b" and closure items
+13–14. This doc is finalized in item 12.
 
 ## Smoke testbench
 
