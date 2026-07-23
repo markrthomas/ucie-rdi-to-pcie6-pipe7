@@ -19,6 +19,9 @@ COV_DIR = obj_dir_cov
 NL1_TOP = tb_pipe7_mac_bridge_nl1
 NL1_DIR = obj_dir_nl1
 NL1_FILES = $(VERILOG_RTL) test/tb_pipe7_mac_bridge_nl1.sv
+# Item 2: PIPE MAC interface contract. Linted via a define-guarded elaboration wrapper
+# (clocking blocks are excluded under ifndef VERILATOR; consumed by the UVM tier).
+MAC_IF = test/uvm/pipe7_mac_if.sv
 UVM_MAKE = $(MAKE) -C test/uvm -f Makefile.vcs
 
 # Default target
@@ -171,6 +174,8 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc --top-module ucie_rdi_to_pipe7_mac_bridge $(VERILOG_RTL)
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN --top-module $(TOP_MODULE) $(VERILOG_FILES)
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN --top-module $(NL1_TOP) $(NL1_FILES)
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-DECLFILENAME \
+		+define+PIPE7_MAC_IF_LINT --top-module pipe7_mac_if_lint_top $(MAC_IF)
 
 uvm_compile:
 	$(UVM_MAKE) compile

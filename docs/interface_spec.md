@@ -1,101 +1,130 @@
-# Interface specification — reusable IP
+# Interface specification — UCIe RDI → PIPE 7.1 MAC bridge
 
-This document defines the **integration contract** for `ucie_rdi_to_pcie_pipe_bridge`. Numeric widths below use **default** parameters; actual widths scale with parameters (see §Parameters).
+**Integration contract** for `ucie_rdi_to_pipe7_mac_bridge`. Two ports face outward: the
+**UCIe RDI** side (controller-facing) and the **PIPE 7.1 MAC** side (PHY-facing). This
+document is the human-readable contract; the machine-readable PIPE contract is
+`test/uvm/pipe7_mac_if.sv`, and every PIPE signal's direction/width/§ref is tabulated in
+`docs/pipe71_mac_signal_map.md`.
+
+> **Status (closure-plan item 2): contract only — no behavior.** The PIPE side is defined
+> here and in `pipe7_mac_if.sv`; the control FSM, message-bus master, and framers that
+> *drive* these signals arrive in items 3–6. PIPE signal names/widths are confirmed against
+> Intel **PIPE 7.1 (Ref 643108, Rev 7.1)** — see `docs/pipe71_spec_crosscheck.md`.
+
+## Scope
+
+- **PIPE architecture:** SerDes (async PHY interface); the PHY is parallel↔serial only, so
+  the **MAC (this bridge) owns 128b/130b encode/decode, block alignment, and the elastic
+  buffer**. The block sync header rides *in-band* in `TxData`/`RxData` — there are **no**
+  `TxStartBlock`/`TxSyncHeader`/`RxStartBlock`/`RxSyncHeader`/`*DataK` pins (Original-PIPE-only).
+- **Rates:** Gen5 (`Rate=4`, 32 GT/s, 128b/130b) and Gen6 (`Rate=5`, 64 GT/s, PAM4). No
+  legacy Gen1–4. "FLIT mode", FEC, and flit-LCRC are controller-side (above PIPE) and cross
+  the interface as opaque `TxData`/`RxData`.
+- **Role:** MAC-facing — the bridge drives MAC-owned signals and reacts to PHY-owned ones;
+  it does not model PHY internals (SerDes, PAM4 precoding, CDR, EI detection).
 
 ## Parameters (compile-time)
 
+`pipe7_pkg` centralizes geometry; `pipe7_mac_if` is parameterized per lane.
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `NUM_LANES` | 4 | Per-lane independent datapaths |
-| `RDI_DATA_WIDTH` | 16 | RDI data width per lane (bits) |
-| `PIPE_DATA_WIDTH` | 32 | PIPE data width per lane (bits); RTL zero-extends RDI into upper bits |
-| `BUFFER_DEPTH` | 16 | Elastic buffer entries **per lane**; must be ≥ 1 |
+| `NUM_LANES` | 4 | Per-lane independent datapaths (bridge top). |
+| `RDI_DATA_WIDTH` | 16 | RDI data width per lane (bits). |
+| `TX_DATA_WIDTH` | 160 | PIPE Tx parallel width per lane; **must be one of {10,20,40,80,160}** (PCIe SerDes), selected by `Width`. |
+| `RX_DATA_WIDTH` | 160 | PIPE Rx parallel width per lane; same valid set, selected by `RxWidth`. |
+| `MB_WIDTH` | 8 | `M2P`/`P2M` message-bus width (`pipe7_pkg::MB_BUS_WIDTH`). |
+| `MB_ADDR_WIDTH` | 12 | Message-bus register address-space width (`pipe7_pkg::MB_ADDR_WIDTH`). |
+| `BUFFER_DEPTH` | 16 | Elastic-buffer entries **per lane**; ≥ 1. |
 
-**Supported use:** Any combination where `BUFFER_DEPTH >= 1` and port widths are consistent with the parameterization. Narrow `NUM_LANES` (for example 1) is allowed if indices are wired accordingly.
+> The item-1 pass-through still uses `PIPE_DATA_WIDTH=32` as a placeholder; items 5–6
+> re-derive the real per-lane width from `Width`/`RxWidth` (see `pipe7_pkg` note).
 
 ## Clocking and reset
 
 | Signal | Domain | Description |
 |--------|--------|-------------|
-| `rdi_clk` | RDI | Rising-edge captures all RDI-domain sequential logic |
-| `pipe_clk` | PIPE | Rising-edge captures PIPE-domain sequential logic and CRC regs |
-| `rst_n` | Global async | **Active-low asynchronous reset**, deassertion assumed synchronous enough to both clock domains for your flow (standard ASIC/FPGA practice: assert async, deassert after clocks stable, meeting recovery/removal) |
+| `rdi_clk` | RDI | Controller-side clock; captures all RDI-domain sequential logic. |
+| `pclk` | PIPE parallel | PIPE command/status/message-bus clock. May be a PHY **output** or **input** (clocking topology, §8.1). |
+| `rx_clk` | PIPE Rx (recovered) | SerDes recovered clock; `RxData`/`RxValid` are synchronous to it, **not** `pclk`. PHY keeps it running ≥ 8 clocks after `RxValid` deasserts. |
+| `Reset#` (`reset_n`) | async | Active-low, asynchronous; may assert any time. PHY holds its lowest-power state while asserted; reports its default power state after reset. |
 
-**Integrator guidance**
+The RDI↔PCLK and PCLK↔RxCLK crossings are handled by `pipe7_cdc_elastic_buf` (ported,
+formally-checked CDC).
 
-- Keep both clocks **free-running** during reset deassertion unless your methodology specifies otherwise.
-- Release `rst_n` only after power/clocks are valid; apply vendor-specific reset-tree constraints.
+## UCIe RDI side (controller ↔ bridge)
 
-## RDI clock domain (source → bridge)
+Per-lane valid/ready with packed data (unchanged from item 1; carries controller-formed
+data — including any flit/FEC/LCRC framing built upstream).
 
-### Data and handshake
+| Signal | Width | Dir | Description |
+|--------|-------|-----|-------------|
+| `rdi_valid` | `NUM_LANES` | In | Per-lane beat valid. |
+| `rdi_ready` | `NUM_LANES` | Out | Per-lane accept (elastic buffer not full). |
+| `rdi_data` | `NUM_LANES*RDI_DATA_WIDTH` | In | Packed: lane `k` = `rdi_data[k*RDI_DATA_WIDTH +: RDI_DATA_WIDTH]`. |
+| `rdi_error` | `NUM_LANES` | In | Per-lane metadata/error flag sampled with the beat. |
+| `rdi_flow_ctrl` | `NUM_LANES` | Out | Asserted when that lane's buffer is full. |
 
-| Signal | Width | Direction | Description |
-|--------|-------|-----------|-------------|
-| `rdi_valid` | `NUM_LANES` | In | Per-lane beat valid |
-| `rdi_ready` | `NUM_LANES` | Out | Per-lane accept (buffer not full) |
-| `rdi_data` | `NUM_LANES*RDI_DATA_WIDTH` | In | Packed lane data: lane `k` occupies `rdi_data[k*RDI_DATA_WIDTH +: RDI_DATA_WIDTH]` |
-| `rdi_error` | `NUM_LANES` | In | Per-lane metadata/error flag sampled into the FIFO with the beat |
+**Rules:** a beat transfers on lane `k` when `rdi_valid[k] && rdi_ready[k]` on a rising
+`rdi_clk`; `rdi_data[k]`/`rdi_error[k]` must be stable while `rdi_valid[k]` holds.
 
-**Rules**
+## PIPE 7.1 MAC side (bridge ↔ PHY)
 
-- A beat is transferred on lane `k` when `rdi_valid[k] && rdi_ready[k]` on a rising `rdi_clk` edge.
-- While `rdi_valid[k]` remains asserted, **`rdi_data[k]` and `rdi_error[k]` must remain stable** (standard valid/ready source behavior).
-- `rdi_ready[k]` may glitch per cycle; the source must only treat `rdi_valid[k] && rdi_ready[k]` as a successful transfer.
+Full per-signal detail (direction from the MAC perspective, width, sync domain, spec §) is
+in **`docs/pipe71_mac_signal_map.md`**; the machine-readable form is the `mac` modport of
+**`pipe7_mac_if.sv`**. Summary of the groups the bridge is responsible for:
 
-### Flow control outputs
+- **Drives (MAC → PHY):** `TxData`, `TxDataValid`; `PowerDown[3:0]`, `Rate[3:0]`,
+  `Width[2:0]`, `RxWidth[2:0]`, `TxElecIdle[3:0]`, `TxDetectRx/Loopback`, `SerDesArch`,
+  `RxStandby`, `SRISEnable`, `Reset#`; the rate/power handshake acks `PclkChangeAck`,
+  `AsyncPowerChangeAck`; `M2P_MessageBus[7:0]`; and (optional, may be tied off)
+  `TxCommonmodeDisable`, `RxEIDetectDisable`, `DeepPMReq#`, `Restore#`.
+- **Samples (PHY → MAC):** `RxData` (on `rx_clk`), `RxValid`; `PhyStatus`, `RxStatus[2:0]`,
+  `RxElecIdle`, `RxStandbyStatus`, `PclkChangeOk`, `RefClkRequired#`, `DeepPMAck#`;
+  `P2M_MessageBus[7:0]`.
 
-| Signal | Width | Description |
-|--------|-------|-------------|
-| `rdi_flow_ctrl` | `NUM_LANES` | Asserted when that lane’s elastic buffer is **full** |
-| `rdi_ready` | `NUM_LANES` | Complement of full for simple backpressure (`rdi_ready = ~full` style) |
+### Handshake protocols (contract the item-3+ FSMs must honor)
 
-## PIPE clock domain (bridge → sink)
+1. **Power-state change** (`PowerDown[3:0]`): assert the new value; completion is a
+   single-cycle `PhyStatus`. Transitions where PCLK is absent are asynchronous; L1-substate
+   power changes without PCLK use `AsyncPowerChangeAck` (assert until `PhyStatus` deasserts).
+2. **Rate / Width / PCLK-rate change:** permitted **only in P0 or P1**, with `TxElecIdle`
+   asserted (and `RxStandby` in P0). Change the field(s); completion is a single-cycle
+   `PhyStatus`. In *PCLK-as-PHY-input* mode, insert the `PclkChangeOk`→(MAC changes PCLK)→
+   `PclkChangeAck`→`PhyStatus` handshake. **No numeric max-latency bound** exists — it is
+   PHY-datasheet/implementation-specific, so any completion-timeout assertion (item 7) must
+   be a **parameter**, not a fixed constant.
+3. **Message bus** (`M2P`/`P2M`, both on `pclk`): idle = `0x00`; framing per §6.1.4.2
+   (read = 2 cyc, read-completion = 2 cyc, write = 3 cyc); 12-bit addr, 8-bit data; 4-bit
+   commands (`NOP`/`write_uncommitted`/`write_committed`/`read`/`read_completion`/
+   `write_ack`). One outstanding read per direction; `write_committed` blocks further writes
+   until `write_ack`. Register map in the signal-map doc.
+4. **Receiver detect:** driven via `TxDetectRx/Loopback`; result reported as
+   `RxStatus == 0b011` (the only `RxStatus` code meaningful in SerDes) and completed by
+   `PhyStatus`.
 
-### Data and handshake
+### Reaction rules the bridge must implement
 
-| Signal | Width | Direction | Description |
-|--------|-------|-----------|-------------|
-| `pipe_valid` | `NUM_LANES` | Out | Per-lane beat valid toward sink |
-| `pipe_ready` | `NUM_LANES` | In | Per-lane sink ready |
-| `pipe_data` | `NUM_LANES*PIPE_DATA_WIDTH` | Out | Lane `k`: lower `RDI_DATA_WIDTH` bits carry payload; upper bits **zero** (extension) |
-| `pipe_error` | `NUM_LANES` | Out | Per-lane flag synchronized through the read path |
+- `RxData`/`RxValid` are in the `rx_clk` domain; cross them to the RDI/PCLK domain through
+  the elastic buffer, and start MAC-side symbol/block lock only after `RxValid` (= `rx_clk`
+  stable).
+- At Gen5/Gen6, **do not trust `RxElecIdle` for electrical-idle *entry***; the MAC detects
+  EI-entry with its own logic (spec requirement ≥ 5 GT/s).
+- `TxDataValid` must be asserted whenever `TxElecIdle` toggles (it qualifies EI sampling).
 
-**Rules**
+## Out of scope on this interface
 
-- A beat is consumed on lane `k` when `pipe_valid[k] && pipe_ready[k]` rises on `pipe_clk` (sink sampling policy must match your STA/sim assumptions).
-- **`pipe_data` / `pipe_error` are not guaranteed stable whenever `pipe_valid && !pipe_ready`.** The RTL may refresh registered PIPE outputs while valid is high and ready is low. If your integration requires strict PIPE “hold until handshake,” treat that as an **extension** (RTL + constraint + verification updates).
+PHY internals (SerDes, PAM4 precoding/gray-code, CDR, EI detection); FEC / flit-LCRC codec
+(controller-side — no FEC signalling or register crosses PIPE); Original-PIPE block-coding
+pins; Gen1–4 legacy rates. See `PLAN.md` "Explicitly out of scope".
 
-### CRC interface
-
-| Signal | Width | Description |
-|--------|-------|-------------|
-| `crc_enable` | `NUM_LANES` | In (PIPE cd) | Enables running CRC update for that lane |
-| `crc_error` | `NUM_LANES` | Out | Indicates residue mismatch when `crc_enable` is active |
-
-**CRC semantics (current RTL)**
-
-- CRC updates **only on accepted PIPE beats**: `pipe_valid && pipe_ready` when `crc_enable` is set.
-- Algorithm is a **32-bit linear-feedback shift style** update with polynomial `0x04C11DB7`; the RTL compares against a **demo residue** `32'h1704_7432`. This is **not** a full PCIe TLP/LCRC/DLCRC implementation. Replace for production protocol compliance.
-
-## Latency (typical simulation)
-
-Order-of-magnitude only; validate per configuration:
-
-- CDC pointer synchronization: a few `pipe_clk` cycles from write to visibility on read side.
-- Additional registered PIPE stage: **observed PIPE data for an accepted beat is coherent when sampled after the RTL nonblocking updates for that cycle** (reference TB scoreboard uses `negedge pipe_clk` after a handshake).
-
-## Timing placeholders
+## Timing / constraints placeholders
 
 Example constraint shells (not signed off): `constraints/example.xdc`, `constraints/example.sdc`.
 
-## Reference simulation bundle
+## Reference bundle
 
-Verilator / Makefile flow files (root):
-
-- `ucie_rdi_to_pcie_pipe_bridge.sv` — canonical RTL  
-- `tb_ucie_rdi_to_pcie_pipe_bridge.sv` — smoke stimulus  
-- `tb_ucie_rdi_to_pcie_pipe_scoreboard.sv` — self-checking reference  
-- `ucie_rdi_to_pcie_pipe_bridge_assertions.sv` — monitors / statistics  
-
-Vendor flows that compile `sim_top.sv` should add the scoreboard to the file list when using the root testbench implementation.
+- `test/uvm/pipe7_mac_if.sv` — machine-readable PIPE MAC contract (modports + clocking blocks).
+- `docs/pipe71_mac_signal_map.md` — per-signal direction/width/§ + register address map.
+- `docs/pipe71_spec_crosscheck.md` — item-0 reconciliation against the controlled spec.
+- `src/pipe7_pkg.sv` — parameters and control-plane encodings (PowerDown/Rate/Width, msg-bus commands).
