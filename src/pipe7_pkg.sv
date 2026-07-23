@@ -83,4 +83,12 @@ package pipe7_pkg;
     parameter int MB_ADDR_WIDTH = 12;  // 12-bit PHY/MAC register address spaces
     /* verilator lint_on UNUSEDPARAM */
 
+    // --- Control FSM request kinds (item 3). Which command the controller is
+    //     asking pipe7_mac_ctrl_fsm to sequence toward the PHY.
+    typedef enum logic [1:0] {
+        REQ_POWER = 2'd0,  // change PowerDown[3:0]
+        REQ_RATE  = 2'd1,  // change Rate[3:0]
+        REQ_WIDTH = 2'd2   // change Width[2:0] / RxWidth[2:0]
+    } ctrl_req_e;
+
 endpackage

@@ -1,5 +1,5 @@
 
-.PHONY: all check ci clean coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_cov verilator_debug verilator_nl1 vivado wave xsim questa
+.PHONY: all check ci clean coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_cov verilator_ctrl verilator_debug verilator_nl1 vivado wave xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
 VERILATOR_ROOT := $(shell if [ -n "$(VERILATOR)" ]; then realpath "$$(dirname "$(VERILATOR)")/../share/verilator"; fi)
@@ -22,6 +22,12 @@ NL1_FILES = $(VERILOG_RTL) test/tb_pipe7_mac_bridge_nl1.sv
 # Item 2: PIPE MAC interface contract. Linted via a define-guarded elaboration wrapper
 # (clocking blocks are excluded under ifndef VERILATOR; consumed by the UVM tier).
 MAC_IF = test/uvm/pipe7_mac_if.sv
+# Item 3: PowerDown/Rate/Width control FSM (PhyStatus-gated) + PHY-responder stub + a
+# self-clocking control-plane smoke, built with `verilator --binary --timing`.
+CTRL_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv
+CTRL_FILES = $(CTRL_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_ctrl_fsm.sv
+CTRL_TOP = tb_pipe7_ctrl_fsm
+CTRL_DIR = obj_dir_ctrl
 UVM_MAKE = $(MAKE) -C test/uvm -f Makefile.vcs
 
 # Default target
@@ -60,8 +66,8 @@ ci: regress regress_cov regress_nl1 coverage_summary docs_check
 
 regress_all: ci
 
-# Release regression (lint + Verilator smoke); CI runs this target.
-regress: lint verilator
+# Release regression (lint + Verilator datapath smoke + control-plane smoke); CI runs this.
+regress: lint verilator verilator_ctrl
 
 # Standard DV alias (DV_STANDARDS.md): sim = Verilator OSS sim.
 sim: verilator
@@ -97,6 +103,18 @@ verilator_nl1:
 		$(VERILATOR_CPP_CORE) -pthread -lm
 	@echo "Running Verilator NL1 simulation..."
 	cd $(NL1_DIR) && ./$(NL1_TOP)
+
+# Item 3: control-plane smoke -- PhyStatus-gated PowerDown/Rate/Width FSM against the
+# non-UVM PHY-responder stub. Self-clocking TB via --binary --timing; $fatal on mismatch.
+verilator_ctrl:
+	@echo "========== Verilator control-plane smoke (PhyStatus-gated FSM) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
+	rm -rf $(CTRL_DIR)
+	$(VERILATOR) --binary --timing -Wall -Isrc \
+		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-DECLFILENAME -Wno-PROCASSINIT \
+		--top-module $(CTRL_TOP) --Mdir $(CTRL_DIR) -o ctrl_sim $(CTRL_FILES)
+	@echo "Running Verilator control-plane smoke..."
+	./$(CTRL_DIR)/ctrl_sim
 
 # Verilator with coverage: separate build dir so normal obj_dir stays unchanged.
 verilator_cov:
@@ -176,6 +194,7 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN --top-module $(NL1_TOP) $(NL1_FILES)
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-DECLFILENAME \
 		+define+PIPE7_MAC_IF_LINT --top-module pipe7_mac_if_lint_top $(MAC_IF)
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_ctrl_fsm $(CTRL_RTL)
 
 uvm_compile:
 	$(UVM_MAKE) compile
@@ -205,7 +224,7 @@ repo_status:
 # Clean up simulation artifacts
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR)
 	rm -f coverage.info
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb
 	rm -rf xsim.dir transcript xsim_*.log
@@ -218,7 +237,8 @@ help:
 	@echo "  make check              - alias for regress"
 	@echo "  make test               - alias for regress"
 	@echo "  make ci                 - regress + coverage + NL1 + docs check"
-	@echo "  make regress             - lint + Verilator smoke (release gate)"
+	@echo "  make regress             - lint + Verilator datapath smoke + control-plane smoke (release gate)"
+	@echo "  make verilator_ctrl      - control-plane smoke: PhyStatus-gated FSM + PHY-responder stub"
 	@echo "  make regress_cov         - lint + Verilator sim with coverage (+ coverage.info if tool present)"
 	@echo "  make regress_nl1         - lint + NUM_LANES=1 Verilator smoke"
 	@echo "  make regress_all         - alias for ci"
