@@ -90,7 +90,7 @@ module tb_pipe7_ctrl_fsm;
     function automatic void check_eq(input logic [3:0] got, input logic [3:0] exp,
                                      input string what);
         if (got !== exp) begin
-            errors++;
+            errors = errors + 1;
             $display("[CTRL FSM] FAIL %s: got %0d expected %0d", what, got, exp);
         end
     endfunction
@@ -115,16 +115,17 @@ module tb_pipe7_ctrl_fsm;
         req_valid = 1'b0;
         wcnt = 0;
         while (!done && !req_error) begin
-            if (wcnt++ > 200) break;
+            wcnt = wcnt + 1;                 // split out of the if-condition; older tools
+            if (wcnt > 200) break;           // hit an internal error on ++ inside an if
             @(negedge pclk);
         end
         if (exp_err) begin
-            if (req_error && !done) err_ok++;
-            else begin errors++; $display("[CTRL FSM] FAIL %s: expected reject, done=%0b err=%0b",
+            if (req_error && !done) err_ok = err_ok + 1;
+            else begin errors = errors + 1; $display("[CTRL FSM] FAIL %s: expected reject, done=%0b err=%0b",
                                            name, done, req_error); end
         end else begin
-            if (done && !req_error) comp_ok++;
-            else begin errors++; $display("[CTRL FSM] FAIL %s: no completion, done=%0b err=%0b",
+            if (done && !req_error) comp_ok = comp_ok + 1;
+            else begin errors = errors + 1; $display("[CTRL FSM] FAIL %s: no completion, done=%0b err=%0b",
                                           name, done, req_error); end
         end
     endtask
@@ -185,11 +186,12 @@ module tb_pipe7_ctrl_fsm;
             @(negedge pclk); i_req_valid = 1'b0;
             wcnt2 = 0;
             while (!i_done && !i_req_error) begin
-                if (wcnt2++ > 200) break;
+                wcnt2 = wcnt2 + 1;
+                if (wcnt2 > 200) break;
                 @(negedge pclk);
             end
-            if (i_done && !i_req_error) comp_ok++;
-            else begin errors++; $display("[CTRL FSM] FAIL input-mode rate: done=%0b err=%0b",
+            if (i_done && !i_req_error) comp_ok = comp_ok + 1;
+            else begin errors = errors + 1; $display("[CTRL FSM] FAIL input-mode rate: done=%0b err=%0b",
                                           i_done, i_req_error); end
             check_eq(i_rate, RATE_GEN6, "input-mode rate=Gen6");
         end
@@ -197,11 +199,11 @@ module tb_pipe7_ctrl_fsm;
         // ---- Report ----
         // Expected: 11 output-mode completions + 1 input-mode completion, 2 rejections.
         if (comp_ok != 12) begin
-            errors++;
+            errors = errors + 1;
             $display("[CTRL FSM] FAIL: completions=%0d expected 12", comp_ok);
         end
         if (err_ok != 2) begin
-            errors++;
+            errors = errors + 1;
             $display("[CTRL FSM] FAIL: rejections=%0d expected 2", err_ok);
         end
 
