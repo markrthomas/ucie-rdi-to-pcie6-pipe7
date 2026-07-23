@@ -6,16 +6,19 @@ on:
   pull_request:
     branches: [main, master]
 
+# Toolchain note: CI uses the OSS CAD Suite (same distribution as local dev), so the
+# Verilator that runs here matches the one used to author/verify each commit. This
+# removes the apt-Verilator version skew that previously rejected constructs the local
+# (newer) Verilator accepts. It also provides iverilog + sby for the upcoming Cocotb
+# (Tier 1b) and formal jobs.
 jobs:
   sim:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Verilator
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y verilator g++
+      - name: Setup OSS CAD Suite (verilator, iverilog, sby)
+        uses: YosysHQ/setup-oss-cad-suite@v3
 
       - name: Regression (lint + Verilator smoke)
         working-directory: ${{ github.workspace }}
@@ -27,10 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Verilator
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y verilator g++
+      - name: Setup OSS CAD Suite (verilator, iverilog, sby)
+        uses: YosysHQ/setup-oss-cad-suite@v3
 
       # Lint already ran in sim; build cov model in obj_dir_cov and emit coverage.dat (+ coverage.info if verilator_coverage exists).
       - name: Verilator line coverage build and run
@@ -50,10 +51,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Verilator
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y verilator g++
+      - name: Setup OSS CAD Suite (verilator, iverilog, sby)
+        uses: YosysHQ/setup-oss-cad-suite@v3
 
       - name: NUM_LANES=1 smoke (make verilator_nl1)
         working-directory: ${{ github.workspace }}
