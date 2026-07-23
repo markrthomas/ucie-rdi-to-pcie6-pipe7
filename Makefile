@@ -1,5 +1,5 @@
 
-.PHONY: all check ci clean coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_cov verilator_ctrl verilator_debug verilator_nl1 vivado wave xsim questa
+.PHONY: all check ci clean coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_cov verilator_ctrl verilator_debug verilator_msgbus verilator_nl1 vivado wave xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
 VERILATOR_ROOT := $(shell if [ -n "$(VERILATOR)" ]; then realpath "$$(dirname "$(VERILATOR)")/../share/verilator"; fi)
@@ -28,6 +28,12 @@ CTRL_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv
 CTRL_FILES = $(CTRL_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_ctrl_fsm.sv
 CTRL_TOP = tb_pipe7_ctrl_fsm
 CTRL_DIR = obj_dir_ctrl
+# Item 4: message-bus master + MAC-side regfile + PHY message-bus responder stub, in a
+# self-clocking M2P/P2M round-trip smoke, built with `verilator --binary --timing`.
+MSGBUS_RTL = src/pipe7_pkg.sv src/pipe7_msgbus_master.sv src/pipe7_regfile.sv
+MSGBUS_FILES = $(MSGBUS_RTL) test/pipe7_msgbus_responder_stub.sv test/tb_pipe7_msgbus.sv
+MSGBUS_TOP = tb_pipe7_msgbus
+MSGBUS_DIR = obj_dir_msgbus
 UVM_MAKE = $(MAKE) -C test/uvm -f Makefile.vcs
 
 # Default target
@@ -66,8 +72,8 @@ ci: regress regress_cov regress_nl1 coverage_summary docs_check
 
 regress_all: ci
 
-# Release regression (lint + Verilator datapath smoke + control-plane smoke); CI runs this.
-regress: lint verilator verilator_ctrl
+# Release regression (lint + Verilator datapath smoke + control-plane + message-bus smokes); CI runs this.
+regress: lint verilator verilator_ctrl verilator_msgbus
 
 # Standard DV alias (DV_STANDARDS.md): sim = Verilator OSS sim.
 sim: verilator
@@ -115,6 +121,18 @@ verilator_ctrl:
 		--top-module $(CTRL_TOP) --Mdir $(CTRL_DIR) -o ctrl_sim $(CTRL_FILES)
 	@echo "Running Verilator control-plane smoke..."
 	./$(CTRL_DIR)/ctrl_sim
+
+# Item 4: message-bus smoke -- M2P/P2M framing round-trip through the master + regfile against
+# the non-UVM PHY message-bus responder stub. Self-clocking TB via --binary --timing.
+verilator_msgbus:
+	@echo "========== Verilator message-bus smoke (M2P/P2M framing) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
+	rm -rf $(MSGBUS_DIR)
+	$(VERILATOR) --binary --timing -Isrc \
+		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(MSGBUS_TOP) --Mdir $(MSGBUS_DIR) -o msgbus_sim $(MSGBUS_FILES)
+	@echo "Running Verilator message-bus smoke..."
+	./$(MSGBUS_DIR)/msgbus_sim
 
 # Verilator with coverage: separate build dir so normal obj_dir stays unchanged.
 verilator_cov:
@@ -195,6 +213,8 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-DECLFILENAME \
 		+define+PIPE7_MAC_IF_LINT --top-module pipe7_mac_if_lint_top $(MAC_IF)
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_ctrl_fsm $(CTRL_RTL)
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_msgbus_master src/pipe7_pkg.sv src/pipe7_msgbus_master.sv
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_regfile src/pipe7_pkg.sv src/pipe7_regfile.sv
 
 uvm_compile:
 	$(UVM_MAKE) compile
@@ -224,7 +244,7 @@ repo_status:
 # Clean up simulation artifacts
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR)
 	rm -f coverage.info
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb
 	rm -rf xsim.dir transcript xsim_*.log
@@ -237,8 +257,9 @@ help:
 	@echo "  make check              - alias for regress"
 	@echo "  make test               - alias for regress"
 	@echo "  make ci                 - regress + coverage + NL1 + docs check"
-	@echo "  make regress             - lint + Verilator datapath smoke + control-plane smoke (release gate)"
+	@echo "  make regress             - lint + Verilator datapath + control-plane + message-bus smokes (release gate)"
 	@echo "  make verilator_ctrl      - control-plane smoke: PhyStatus-gated FSM + PHY-responder stub"
+	@echo "  make verilator_msgbus    - message-bus smoke: M2P/P2M framing master + regfile + responder stub"
 	@echo "  make regress_cov         - lint + Verilator sim with coverage (+ coverage.info if tool present)"
 	@echo "  make regress_nl1         - lint + NUM_LANES=1 Verilator smoke"
 	@echo "  make regress_all         - alias for ci"

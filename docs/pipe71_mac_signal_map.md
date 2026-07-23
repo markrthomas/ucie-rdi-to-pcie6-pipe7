@@ -103,6 +103,17 @@ Address is **12-bit**, data **8-bit**.
 `write_uncommitted*` + `write_committed` give atomic multi-register updates (write buffer
 depth ≥ 5). One outstanding `read` per direction; no new write until `write_ack`.
 
+**Item-4 RTL.** This framing is realized by `src/pipe7_msgbus_master.sv` (MAC-side M2P
+master: drives the 2-/3-cycle command framing above, consumes the P2M `read_completion`/
+`write_ack` responses, single outstanding transaction) and stored on the MAC side by
+`src/pipe7_regfile.sv` (parameterizable 8-bit register window). Opcodes are
+`pipe7_pkg::msgbus_cmd_e`; the confirmed address anchors (`REG_PHY_TX_CTRL_BASE=0x400`,
+`REG_PHY_RX_MARGIN_C0/C1=0x000/0x001`, `REG_MAC_RX_MARGIN_S0=0x000`) are `pipe7_pkg`
+constants. Item 0 confirmed those anchors but **not** the per-field sub-offsets inside the
+`0x400` block, so the regfile stays a generic window rather than hard-coding unverified
+offsets. Round-trip smoke: `make verilator_msgbus` (`test/tb_pipe7_msgbus.sv` against the
+`test/pipe7_msgbus_responder_stub.sv` PHY-side responder).
+
 ## Message-bus register address map
 
 12-bit address spaces, one hosted by the PHY and one by the MAC (§7.1 / §7.2). Addresses

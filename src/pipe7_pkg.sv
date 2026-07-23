@@ -81,6 +81,21 @@ package pipe7_pkg;
     /* verilator lint_off UNUSEDPARAM */
     parameter int MB_BUS_WIDTH  = 8;   // M2P/P2M_MessageBus[7:0]
     parameter int MB_ADDR_WIDTH = 12;  // 12-bit PHY/MAC register address spaces
+    parameter int MB_DATA_WIDTH = 8;   // one register access carries 8 data bits
+
+    // --- Message-bus register addresses (12-bit). The 12-bit space is scoped by
+    //     direction: M2P addresses target the PHY register space (§7.1); P2M
+    //     addresses target the MAC register space (§7.2). So a PHY and a MAC
+    //     register may share a numeric address without collision. (crosscheck
+    //     G4/G6). Only spec-confirmed addresses are named here; sub-offsets inside
+    //     the PHY Tx Control block (e.g. where PAM4RestrictedLevels/TxDeemph land
+    //     within 0x400..0x40A) were not pinned by item 0 and are left to the
+    //     regfile's parameterizable window rather than fabricated.
+    parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_TX_CTRL_BASE = 12'h400; // PHY Tx Control regs 0x400..0x40A (eq presets/de-emphasis/PAM4RestrictedLevels)
+    parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_TX_CTRL_END  = 12'h40A; // inclusive top of the PHY Tx Control block
+    parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_RX_MARGIN_C0 = 12'h000; // PHY Rx Margin Control0 (§7.1 / G6)
+    parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_RX_MARGIN_C1 = 12'h001; // PHY Rx Margin Control1
+    parameter logic [MB_ADDR_WIDTH-1:0] REG_MAC_RX_MARGIN_S0 = 12'h000; // MAC Rx Margin Status0 (§7.2 / G6, MAC space)
     /* verilator lint_on UNUSEDPARAM */
 
     // --- Control FSM request kinds (item 3). Which command the controller is
