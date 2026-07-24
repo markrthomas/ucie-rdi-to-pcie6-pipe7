@@ -1,5 +1,5 @@
 
-.PHONY: all check ci clean coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_msgbus verilator_nl1 vivado wave xsim questa
+.PHONY: all check ci clean coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_gen6 verilator_msgbus verilator_nl1 vivado wave xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
 VERILATOR_ROOT := $(shell if [ -n "$(VERILATOR)" ]; then realpath "$$(dirname "$(VERILATOR)")/../share/verilator"; fi)
@@ -40,6 +40,12 @@ FRAMING_RTL = src/pipe7_pkg.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv
 FRAMING_FILES = $(FRAMING_RTL) test/tb_pipe7_framing.sv
 FRAMING_TOP = tb_pipe7_framing
 FRAMING_DIR = obj_dir_framing
+# Item 6: Gen6 (Rate=5) wide raw datapath (no 128b/130b sync header) + PAM4RestrictedLevels
+# carry, composed with the item-3 ctrl FSM for Gen6 rate/L0p-width. Self-clocking smoke.
+GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
+GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
+GEN6_TOP = tb_pipe7_gen6
+GEN6_DIR = obj_dir_gen6
 UVM_MAKE = $(MAKE) -C test/uvm -f Makefile.vcs
 
 # Default target
@@ -78,8 +84,8 @@ ci: regress regress_cov regress_nl1 coverage_summary docs_check
 
 regress_all: ci
 
-# Release regression (lint + Verilator datapath + control-plane + message-bus + framing smokes); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing
+# Release regression (lint + Verilator datapath + control-plane + message-bus + framing + Gen6 smokes); CI runs this.
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_gen6
 
 # Standard DV alias (DV_STANDARDS.md): sim = Verilator OSS sim.
 sim: verilator
@@ -151,6 +157,18 @@ verilator_framing:
 		--top-module $(FRAMING_TOP) --Mdir $(FRAMING_DIR) -o framing_sim $(FRAMING_FILES)
 	@echo "Running Verilator framing smoke..."
 	./$(FRAMING_DIR)/framing_sim
+
+# Item 6: Gen6 datapath smoke -- Gen6 rate + L0p width via the ctrl FSM, then the raw wide
+# datapath round-trip + PAM4RestrictedLevels carry. Self-clocking TB via --binary --timing.
+verilator_gen6:
+	@echo "========== Verilator Gen6 smoke (Rate=5 raw wide datapath + PAM4) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
+	rm -rf $(GEN6_DIR)
+	$(VERILATOR) --binary --timing -Isrc \
+		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(GEN6_TOP) --Mdir $(GEN6_DIR) -o gen6_sim $(GEN6_FILES)
+	@echo "Running Verilator Gen6 smoke..."
+	./$(GEN6_DIR)/gen6_sim
 
 # Verilator with coverage: separate build dir so normal obj_dir stays unchanged.
 verilator_cov:
@@ -235,6 +253,7 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_regfile src/pipe7_pkg.sv src/pipe7_regfile.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_tx_framer src/pipe7_pkg.sv src/pipe7_tx_framer.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_rx_deframer src/pipe7_pkg.sv src/pipe7_rx_deframer.sv
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_gen6_datapath src/pipe7_pkg.sv src/pipe7_gen6_datapath.sv
 
 uvm_compile:
 	$(UVM_MAKE) compile
@@ -264,7 +283,7 @@ repo_status:
 # Clean up simulation artifacts
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(GEN6_DIR)
 	rm -f coverage.info
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb
 	rm -rf xsim.dir transcript xsim_*.log
@@ -281,6 +300,7 @@ help:
 	@echo "  make verilator_ctrl      - control-plane smoke: PhyStatus-gated FSM + PHY-responder stub"
 	@echo "  make verilator_msgbus    - message-bus smoke: M2P/P2M framing master + regfile + responder stub"
 	@echo "  make verilator_framing   - framing smoke: Gen5 128b/130b TX framer -> RX deframer round-trip"
+	@echo "  make verilator_gen6      - Gen6 smoke: Rate=5 raw wide datapath + L0p width + PAM4 config"
 	@echo "  make regress_cov         - lint + Verilator sim with coverage (+ coverage.info if tool present)"
 	@echo "  make regress_nl1         - lint + NUM_LANES=1 Verilator smoke"
 	@echo "  make regress_all         - alias for ci"

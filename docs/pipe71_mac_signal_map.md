@@ -45,8 +45,22 @@ bridge is the source (a PHY input); `sample` = the bridge is the sink (a PHY out
 > ordered-set `0b01`) and serializes them onto `TxData`; `src/pipe7_rx_deframer.sv` recovers
 > block alignment (sync-header hunt with 1-bit slip), checks the header, and emits the 128-bit
 > payload. Constants live in `pipe7_pkg` (`BLOCK_BITS=130`, `SYNC_HDR_DATA/OS`). The single-
-> block-per-`pclk` engines cover Gen5 widths ≤ 80; the 160-bit two-blocks-per-`pclk` gearbox is
-> item 6. Round-trip smoke: `make verilator_framing` (`test/tb_pipe7_framing.sv`).
+> block-per-`pclk` engines cover Gen5 widths ≤ 80. Round-trip smoke: `make verilator_framing`
+> (`test/tb_pipe7_framing.sv`).
+
+> **Gen6 (Rate=5) is a raw wide conduit — no sync header (item 6).** At 64 GT/s the PIPE
+> datapath is 1b/1b: `TxData`/`RxData` carry already-encoded data with **no** 128b/130b sync
+> header, and the 256B flit + FEC + LCRC are built controller-side and arrive on RDI — the
+> bridge does **not** frame flits on the PIPE side (crosscheck B2/I1/I3). `src/pipe7_gen6_datapath.sv`
+> is a registered wide pass-through (default 160-bit) with no block coding and no RX alignment
+> hunt; it also carries the MAC's only PAM4 knob, `PAM4RestrictedLevels` (a PHY Tx Control field
+> programmed over the message bus — precoding math is PHY-side, crosscheck G5/I4). Gen6
+> rate/width and **L0p (an ordinary `Width`/`RxWidth` change, crosscheck C3/C4)** reuse the item-3
+> `pipe7_mac_ctrl_fsm` handshake. Smoke: `make verilator_gen6` (`test/tb_pipe7_gen6.sv`).
+>
+> *Scope note:* item 6 delivers the Gen6 raw path at 160-bit and keeps the Gen5 128b/130b path
+> at widths ≤ 80. A Gen5-at-160 (two-blocks-per-`pclk`) gearbox — which must emit/consume up to
+> two 130-bit blocks per cycle — is a separate enhancement, not silently folded in here.
 
 ## MAC → PHY : command / config (bridge drives)
 
