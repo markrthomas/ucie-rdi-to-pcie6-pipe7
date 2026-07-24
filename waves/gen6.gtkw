@@ -1,0 +1,66 @@
+[*]
+[*] GTKWave save file — tb_pipe7_gen6 : Gen6 (Rate=5) raw wide datapath + L0p + PAM4
+[*] Open via:  make gtkwave WAVE_TB=gen6
+[*]
+[dumpfile] "gen6.vcd"
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 280
+[signals_width] 340
+[sst_expanded] 1
+@200
+-Clock / Reset
+@28
+tb_pipe7_gen6.clk
+tb_pipe7_gen6.reset_n
+@200
+-Control  (Rate -> Gen6, L0p Width change)
+@28
+tb_pipe7_gen6.req_valid
+@22
+tb_pipe7_gen6.req_kind[1:0]
+tb_pipe7_gen6.req_rate[3:0]
+tb_pipe7_gen6.req_width[2:0]
+tb_pipe7_gen6.ctrl.state[2:0]
+@28
+tb_pipe7_gen6.busy
+tb_pipe7_gen6.done
+tb_pipe7_gen6.req_error
+@200
+-Command out / PHY handshake
+@22
+tb_pipe7_gen6.power_down[3:0]
+tb_pipe7_gen6.rate[3:0]
+tb_pipe7_gen6.width[2:0]
+tb_pipe7_gen6.tx_elec_idle[3:0]
+@28
+tb_pipe7_gen6.phy_status
+tb_pipe7_gen6.pclk_change_ok
+@200
+-Gen6 datapath  (raw wide, NO sync header)
+@28
+tb_pipe7_gen6.gen6_mode
+tb_pipe7_gen6.tx_pl_valid
+tb_pipe7_gen6.tx_pl_ready
+@22
+tb_pipe7_gen6.tx_pl_data[159:0]
+@28
+tb_pipe7_gen6.pipe_tx_valid
+@22
+tb_pipe7_gen6.pipe_tx[159:0]
+@28
+tb_pipe7_gen6.rx_pl_valid
+@22
+tb_pipe7_gen6.rx_pl_data[159:0]
+@200
+-PAM4RestrictedLevels config
+@22
+tb_pipe7_gen6.pam4_rlvl[7:0]
+tb_pipe7_gen6.pam4_cfg_out[7:0]
+@200
+-Scoreboard
+@28
+tb_pipe7_gen6.comp_ok
+tb_pipe7_gen6.recv
+tb_pipe7_gen6.errors

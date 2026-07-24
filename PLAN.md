@@ -277,8 +277,9 @@ the selected self-clocking TB with `--trace` (`+define+ENABLE_WAVES` arms an opt
 `$dumpvars`; the VCD path is passed at run time via `+wavefile`) and writes `waves/<tb>.vcd`;
 **`make gtkwave WAVE_TB=<tb>`** opens it in GTKWave with a **saved, formatted `waves/<tb>.gtkw`
 signal layout** (grouped clock/request/state/response sections, hex buses). Layouts are
-committed for `framing`/`ctrl`/`msgbus`; other TBs open without a saved layout. The generated
-VCDs are git-ignored; the `.gtkw` files are tracked.
+committed for **all five** self-clocking TBs (`framing`/`ctrl`/`msgbus`/`gen6`/`assn`); the
+`gtkwave` target still falls back to a layout-less open if a `.gtkw` is ever absent. The
+generated VCDs are git-ignored; the `.gtkw` files are tracked.
 
 ---
 

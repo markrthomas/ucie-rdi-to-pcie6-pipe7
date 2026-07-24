@@ -1,0 +1,58 @@
+[*]
+[*] GTKWave save file — tb_pipe7_assertions : PIPE MAC protocol SVA (P1..P4)
+[*] Open via:  make gtkwave WAVE_TB=assn
+[*]
+[dumpfile] "assn.vcd"
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 280
+[signals_width] 360
+[sst_expanded] 1
+@200
+-Clock / Reset
+@28
+tb_pipe7_assertions.clk
+tb_pipe7_assertions.reset_n
+@200
+-P1  no Tx while TxElecIdle
+@22
+tb_pipe7_assertions.tx_elec_idle[3:0]
+@28
+tb_pipe7_assertions.stream_valid
+@200
+-P2/P3  Rate change in legal PowerDown; PhyStatus within bound
+@28
+tb_pipe7_assertions.req_valid
+@22
+tb_pipe7_assertions.req_rate[3:0]
+tb_pipe7_assertions.ctrl.state[2:0]
+@28
+tb_pipe7_assertions.busy
+tb_pipe7_assertions.done
+tb_pipe7_assertions.req_error
+@22
+tb_pipe7_assertions.power_down[3:0]
+tb_pipe7_assertions.rate[3:0]
+@28
+tb_pipe7_assertions.phy_status
+@200
+-P4  Gen5 sync-header legality
+@28
+tb_pipe7_assertions.pl_valid_i
+tb_pipe7_assertions.pl_ready_i
+@22
+tb_pipe7_assertions.stream[79:0]
+@28
+tb_pipe7_assertions.pl_valid_o
+tb_pipe7_assertions.blk_locked_o
+tb_pipe7_assertions.sync_err_o
+@200
+-Coverage (non-vacuity) / status
+@28
+tb_pipe7_assertions.cov_ei_idle
+tb_pipe7_assertions.cov_tx_active
+tb_pipe7_assertions.cov_rate_chg
+tb_pipe7_assertions.cov_busy_rose
+tb_pipe7_assertions.comp_ok
+tb_pipe7_assertions.errors
