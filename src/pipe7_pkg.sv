@@ -98,6 +98,19 @@ package pipe7_pkg;
     parameter logic [MB_ADDR_WIDTH-1:0] REG_MAC_RX_MARGIN_S0 = 12'h000; // MAC Rx Margin Status0 (§7.2 / G6, MAC space)
     /* verilator lint_on UNUSEDPARAM */
 
+    // --- Gen5 128b/130b block framing (MAC-owned in the SerDes architecture;
+    //     PHY is parallel<->serial only). A block = 2-bit sync header + 128-bit
+    //     payload = 130 bits. The 2b sync header is embedded in TxData/RxData by
+    //     the MAC -- there are NO discrete Tx/RxSyncHeader/StartBlock pins in
+    //     SerDes. (crosscheck H1/H2/H3). Only sync[1:0] are used in PCIe.
+    /* verilator lint_off UNUSEDPARAM */
+    parameter int SYNC_HDR_BITS = 2;
+    parameter int BLOCK_PAYLOAD = 128;
+    parameter int BLOCK_BITS    = SYNC_HDR_BITS + BLOCK_PAYLOAD;   // 130
+    parameter logic [1:0] SYNC_HDR_DATA = 2'b10;   // Data block (PCIe 128b/130b)
+    parameter logic [1:0] SYNC_HDR_OS   = 2'b01;   // Ordered-Set block
+    /* verilator lint_on UNUSEDPARAM */
+
     // --- Control FSM request kinds (item 3). Which command the controller is
     //     asking pipe7_mac_ctrl_fsm to sequence toward the PHY.
     typedef enum logic [1:0] {

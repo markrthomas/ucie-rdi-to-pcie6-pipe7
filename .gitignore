@@ -4,6 +4,7 @@ obj_dir_cov/
 obj_dir_nl1/
 obj_dir_ctrl/
 obj_dir_msgbus/
+obj_dir_framing/
 coverage.info
 *.dat
 

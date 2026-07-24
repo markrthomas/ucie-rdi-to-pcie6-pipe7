@@ -38,6 +38,16 @@ bridge is the source (a PHY input); `sample` = the bridge is the sink (a PHY out
 | TxData | `tx_data` | drive | `TX_DATA_WIDTH` ∈ {10,20,40,80,160} | `pclk` | §6.1.1 (Table 6-1) | SerDes parallel width per `Width`. Block-encoded data uses 8 of each 10-bit slice ([9:8],[19:18]… reserved). |
 | TxDataValid | `tx_data_valid` | drive | 1 | `pclk` | §6.1.1 (Table 6-1) | Used at 8/16/32/**64**/128 GT/s. Also qualifies `TxElecIdle` sampling. |
 
+> **Gen5 128b/130b framing is MAC-owned (item 5).** In the SerDes architecture the 2-bit sync
+> header is embedded in `TxData`/`RxData` by the MAC's block coder — there is **no** discrete
+> `TxSyncHeader`/`TxStartBlock`/`RxSyncHeader`/`RxStartBlock` pin (crosscheck H1/H3/E3/E4/F3/F4).
+> `src/pipe7_tx_framer.sv` forms 130-bit blocks (`{payload[127:0], sync[1:0]}`, data `0b10` /
+> ordered-set `0b01`) and serializes them onto `TxData`; `src/pipe7_rx_deframer.sv` recovers
+> block alignment (sync-header hunt with 1-bit slip), checks the header, and emits the 128-bit
+> payload. Constants live in `pipe7_pkg` (`BLOCK_BITS=130`, `SYNC_HDR_DATA/OS`). The single-
+> block-per-`pclk` engines cover Gen5 widths ≤ 80; the 160-bit two-blocks-per-`pclk` gearbox is
+> item 6. Round-trip smoke: `make verilator_framing` (`test/tb_pipe7_framing.sv`).
+
 ## MAC → PHY : command / config (bridge drives)
 
 | Spec signal | IF signal | Dir | Width | Domain | Spec § | Notes |
