@@ -1,0 +1,39 @@
+
+# VCS Makefile for the PIPE 7.1 MAC-facing bridge UVM environment (closure-plan items 8+).
+# Authored-and-review-validated: VCS/UVM 1.2 is not run in the OSS environment (no VCS here);
+# the Verilator gate validates the RTL + the DUT wiring (`make lint` at the repo root builds
+# pipe7_mac_dut). Compile/run this under VCS where available.
+
+VCS = vcs -sverilog -ntb_opts uvm-1.2 \
+      -timescale=1ns/1ps \
+      -debug_access+all \
+      -kdb -lca \
+      +incdir+../../src \
+      +incdir+. \
+      +incdir+seq_lib
+
+# Compile order: package -> RTL cores -> interfaces -> DUT -> UVM pkg -> seq_lib -> top.
+SRCS = ../../src/pipe7_pkg.sv \
+       ../../src/pipe7_tx_framer.sv \
+       ../../src/pipe7_rx_deframer.sv \
+       ucie_rdi_if.sv \
+       pipe7_mac_if.sv \
+       pipe7_mac_dut.sv \
+       pipe7_mac_pkg.sv \
+       seq_lib/pipe7_seq_lib.sv \
+       uvm_test_top.sv
+
+all: compile run
+
+compile:
+	$(VCS) $(SRCS) -l compile.log
+
+run:
+	./simv +UVM_TESTNAME=pipe7_mac_sanity_test -l sim.log
+
+pdf:
+	pandoc README.md -o UVM_README.pdf --toc --number-sections
+
+clean:
+	rm -rf simv* csrc DVEfiles inter.vpd ucli.key compile.log sim.log
+	rm -rf stack.info.* .vdb UVM_README.pdf verdi* novas*

@@ -320,6 +320,7 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_rx_deframer src/pipe7_pkg.sv src/pipe7_rx_deframer.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_gen6_datapath src/pipe7_pkg.sv src/pipe7_gen6_datapath.sv
 	$(VERILATOR) --lint-only -Wall --assert -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_bridge_assertions src/pipe7_pkg.sv $(ASSN_MOD)
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_dut src/pipe7_pkg.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv test/uvm/pipe7_mac_dut.sv
 
 # ============================ Cross-checks & UVM ============================
 # Tier 1b: PyUVM-on-Cocotb cross-check (closure-plan items 13-14). Runs the PyUVM env against
