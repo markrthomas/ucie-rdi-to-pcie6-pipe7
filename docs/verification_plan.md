@@ -77,6 +77,27 @@ Source: `tb_ucie_rdi_to_pcie_pipe_nl1`, clocks from `sim_main_nl1.cpp` (same coa
 
 ## Assertion / monitoring policy
 
+### PIPE 7.1 protocol assertions (item 7)
+
+`test/pipe7_mac_bridge_assertions.sv` is a reusable, parameterizable SVA checker for the
+MAC-facing protocol. Each property is guarded by a `CHECK_*` parameter so an instance asserts
+only over signals meaningful in its context, and a violation `$fatal`s (non-zero CI exit):
+
+| Property | Check | Spec / crosscheck |
+|----------|-------|-------------------|
+| P1 `CHECK_TX_EI` | No `TxDataValid` while `TxElecIdle == 4'hF` (a data phase must deassert EI first) | E5 |
+| P2 `CHECK_RATE_PD` | A `Rate` change occurs only in `PowerDown` P0 or P1 | §8.4.1 / B5·D3 |
+| P3 `CHECK_PHYSTAT` | Every accepted control request (busy↑) completes via `PhyStatus` within `PHYSTATUS_MAX_LATENCY` — a **parameter**, not a spec constant | D4 |
+| P4 `CHECK_SYNC` | On a correct Gen5 link the deframer never flags an illegal sync header | H1·H2 |
+
+Runnable via `make verilator_assn` (needs Verilator `--assert`): `test/tb_pipe7_assertions.sv`
+drives a coherent good scenario (idle → control → Gen5 data → re-idle) so every property holds,
+and **counts each antecedent** so a vacuous pass is itself a failure. The checker's teeth are
+confirmed out-of-band by injecting a violation and observing the `$fatal`. Intended for `bind`
+into the UVM/PyUVM tiers and the integrated bridge as datapath/control are unified.
+
+### Legacy datapath monitor policy (predecessor-derived smoke)
+
 - **RDI:** Data and per-lane `rdi_error` are expected stable while `rdi_valid` stays asserted (matches typical source behavior).
 - **PIPE:** The bridge may update registered `pipe_data` / `pipe_error` while `pipe_valid && !pipe_ready` (see DUT `always_ff`). There is **no** “stable while valid” check on PIPE data in the monitor so simulation stays aligned with the RTL.
 
