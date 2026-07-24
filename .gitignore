@@ -28,6 +28,9 @@ xsim_*.log
 # Formal (SymbiYosys)
 verification/formal/*_out/
 
+# This Env
+NOTES.md
+
 # Editor / OS
 *.swp
 .DS_Store
