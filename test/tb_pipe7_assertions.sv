@@ -31,6 +31,16 @@ module tb_pipe7_assertions;
     initial clk = 1'b0;
     always #5 clk = ~clk;
 
+`ifdef ENABLE_WAVES
+    // Opt-in waveform dump: build with +define+ENABLE_WAVES --trace (see `make waves`).
+    initial begin
+        string wf;
+        if ($value$plusargs("wavefile=%s", wf)) $dumpfile(wf);
+        else                                     $dumpfile("waves.vcd");
+        $dumpvars(0, tb_pipe7_assertions);
+    end
+`endif
+
     int errors;
     int comp_ok;
     // Non-vacuity counters (each assertion's antecedent must fire at least once).

@@ -1,0 +1,46 @@
+[*]
+[*] GTKWave save file — tb_pipe7_ctrl_fsm : PowerDown/Rate/Width control FSM (PhyStatus-gated)
+[*] Open via:  make gtkwave WAVE_TB=ctrl
+[*]
+[dumpfile] "ctrl.vcd"
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 280
+[signals_width] 340
+[sst_expanded] 1
+@200
+-Clock / Reset
+@28
+tb_pipe7_ctrl_fsm.pclk
+tb_pipe7_ctrl_fsm.reset_n
+@200
+-Request in  (controller -> FSM)
+@28
+tb_pipe7_ctrl_fsm.req_valid
+@22
+tb_pipe7_ctrl_fsm.req_kind[1:0]
+tb_pipe7_ctrl_fsm.req_power_down[3:0]
+tb_pipe7_ctrl_fsm.req_rate[3:0]
+tb_pipe7_ctrl_fsm.req_width[2:0]
+@200
+-FSM state / status
+@22
+tb_pipe7_ctrl_fsm.dut.state[2:0]
+@28
+tb_pipe7_ctrl_fsm.busy
+tb_pipe7_ctrl_fsm.done
+tb_pipe7_ctrl_fsm.req_error
+@200
+-Command out  (FSM -> PHY)
+@22
+tb_pipe7_ctrl_fsm.power_down[3:0]
+tb_pipe7_ctrl_fsm.rate[3:0]
+tb_pipe7_ctrl_fsm.width[2:0]
+tb_pipe7_ctrl_fsm.tx_elec_idle[3:0]
+@200
+-PHY handshake
+@28
+tb_pipe7_ctrl_fsm.phy_status
+tb_pipe7_ctrl_fsm.pclk_change_ok
+tb_pipe7_ctrl_fsm.pclk_change_ack

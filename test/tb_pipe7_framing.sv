@@ -27,6 +27,16 @@ module tb_pipe7_framing;
     initial clk = 1'b0;
     always #5 clk = ~clk;
 
+`ifdef ENABLE_WAVES
+    // Opt-in waveform dump: build with +define+ENABLE_WAVES --trace (see `make waves`).
+    initial begin
+        string wf;
+        if ($value$plusargs("wavefile=%s", wf)) $dumpfile(wf);
+        else                                     $dumpfile("waves.vcd");
+        $dumpvars(0, tb_pipe7_framing);
+    end
+`endif
+
     int  errors;
     int  recv;
     int  sync_err_count;

@@ -1,0 +1,45 @@
+[*]
+[*] GTKWave save file — tb_pipe7_msgbus : M2P/P2M message-bus master + regfile
+[*] Open via:  make gtkwave WAVE_TB=msgbus
+[*]
+[dumpfile] "msgbus.vcd"
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 280
+[signals_width] 340
+[sst_expanded] 1
+@200
+-Clock / Reset
+@28
+tb_pipe7_msgbus.pclk
+tb_pipe7_msgbus.reset_n
+@200
+-Request in  (controller -> master)
+@28
+tb_pipe7_msgbus.req_valid
+tb_pipe7_msgbus.req_write
+tb_pipe7_msgbus.req_committed
+tb_pipe7_msgbus.req_ready
+@22
+tb_pipe7_msgbus.req_addr[11:0]
+tb_pipe7_msgbus.req_wdata[7:0]
+@200
+-Message bus  (M2P -> PHY, P2M -> MAC)
+@22
+tb_pipe7_msgbus.master.state[2:0]
+tb_pipe7_msgbus.m2p[7:0]
+tb_pipe7_msgbus.p2m[7:0]
+tb_pipe7_msgbus.responder.rstate[2:0]
+@200
+-Response  (master -> controller)
+@28
+tb_pipe7_msgbus.rsp_valid
+tb_pipe7_msgbus.rsp_is_read
+@22
+tb_pipe7_msgbus.rsp_rdata[7:0]
+@200
+-Scoreboard
+@28
+tb_pipe7_msgbus.completions
+tb_pipe7_msgbus.errors

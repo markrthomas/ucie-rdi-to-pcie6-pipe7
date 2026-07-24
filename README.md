@@ -33,3 +33,14 @@ Two-tier, mirroring the predecessor's methodology:
 
 See [`docs/`](docs/) and [`PLAN.md`](PLAN.md) for architecture, interface contract, and the
 verification plan.
+
+## Build / developer workflow
+
+`make` (no target) prints a grouped list of targets. Common ones:
+
+- `make regress` — release gate (lint + every Verilator smoke).
+- `make cocotb` — Tier 1b PyUVM-on-Cocotb cross-checks (datapath + control-plane + message-bus).
+- `make waves WAVE_TB=framing|ctrl|msgbus|gen6|assn` — build+run a testbench with tracing to
+  `waves/<tb>.vcd`; `make gtkwave WAVE_TB=...` opens it in GTKWave with the saved
+  [`waves/<tb>.gtkw`](waves/) signal layout.
+- `make ci` — the full local run (regress + coverage + NL1 + docs check).

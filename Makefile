@@ -1,5 +1,13 @@
+# Root Makefile — ucie_rdi_to_pcie6_pipe7
+# UCIe 1.0 RDI <-> PCIe 6.x / PIPE 7.1 MAC-facing bridge IP (Gen5 + Gen6).
+# `make` (no target) prints the grouped target list below. Verilator is the OSS gate;
+# the PyUVM-on-Cocotb tier (`make cocotb`) and the VCS/UVM tier (`make uvm`) sit above it.
 
-.PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_gen6 verilator_msgbus verilator_nl1 vivado wave xsim questa
+.PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal \
+        gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
+        sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
+        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_gen6 \
+        verilator_msgbus verilator_nl1 vivado wave waves xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
 VERILATOR_ROOT := $(shell if [ -n "$(VERILATOR)" ]; then realpath "$$(dirname "$(VERILATOR)")/../share/verilator"; fi)
@@ -7,8 +15,7 @@ VERILATOR_INC := $(VERILATOR_ROOT)/include
 VERILATOR_CPP_CORE = $(VERILATOR_INC)/verilated.cpp $(VERILATOR_INC)/verilated_vcd_c.cpp \
 	$(VERILATOR_INC)/verilated_threads.cpp
 
-# Item 1 (datapath-only pass-through) file lists. Framing/FSM/message-bus
-# sources and the adapted scoreboard/assertions/UVM come in later items.
+# ---- Datapath-only pass-through smoke (item 1) ----
 VERILOG_RTL = src/pipe7_pkg.sv src/pipe7_cdc_elastic_buf.sv src/ucie_rdi_to_pipe7_mac_bridge.sv
 VERILOG_FILES = $(VERILOG_RTL) test/tb_pipe7_mac_bridge.sv
 TOP_MODULE = tb_pipe7_mac_bridge
@@ -19,35 +26,29 @@ COV_DIR = obj_dir_cov
 NL1_TOP = tb_pipe7_mac_bridge_nl1
 NL1_DIR = obj_dir_nl1
 NL1_FILES = $(VERILOG_RTL) test/tb_pipe7_mac_bridge_nl1.sv
-# Item 2: PIPE MAC interface contract. Linted via a define-guarded elaboration wrapper
-# (clocking blocks are excluded under ifndef VERILATOR; consumed by the UVM tier).
+# Item 2: PIPE MAC interface contract (define-guarded elaboration wrapper for lint).
 MAC_IF = test/uvm/pipe7_mac_if.sv
-# Item 3: PowerDown/Rate/Width control FSM (PhyStatus-gated) + PHY-responder stub + a
-# self-clocking control-plane smoke, built with `verilator --binary --timing`.
+# Item 3: PowerDown/Rate/Width control FSM (PhyStatus-gated) + responder stub.
 CTRL_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv
 CTRL_FILES = $(CTRL_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_ctrl_fsm.sv
 CTRL_TOP = tb_pipe7_ctrl_fsm
 CTRL_DIR = obj_dir_ctrl
-# Item 4: message-bus master + MAC-side regfile + PHY message-bus responder stub, in a
-# self-clocking M2P/P2M round-trip smoke, built with `verilator --binary --timing`.
+# Item 4: message-bus master + MAC-side regfile + PHY responder stub.
 MSGBUS_RTL = src/pipe7_pkg.sv src/pipe7_msgbus_master.sv src/pipe7_regfile.sv
 MSGBUS_FILES = $(MSGBUS_RTL) test/pipe7_msgbus_responder_stub.sv test/tb_pipe7_msgbus.sv
 MSGBUS_TOP = tb_pipe7_msgbus
 MSGBUS_DIR = obj_dir_msgbus
-# Item 5: Gen5 128b/130b TX framer + RX deframer (MAC-owned block coding) in a self-clocking
-# loopback round-trip smoke, built with `verilator --binary --timing`.
+# Item 5: Gen5 128b/130b TX framer + RX deframer (MAC-owned) loopback.
 FRAMING_RTL = src/pipe7_pkg.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv
 FRAMING_FILES = $(FRAMING_RTL) test/tb_pipe7_framing.sv
 FRAMING_TOP = tb_pipe7_framing
 FRAMING_DIR = obj_dir_framing
-# Item 6: Gen6 (Rate=5) wide raw datapath (no 128b/130b sync header) + PAM4RestrictedLevels
-# carry, composed with the item-3 ctrl FSM for Gen6 rate/L0p-width. Self-clocking smoke.
+# Item 6: Gen6 (Rate=5) wide raw datapath + PAM4, composed with the ctrl FSM.
 GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
 GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
 GEN6_TOP = tb_pipe7_gen6
 GEN6_DIR = obj_dir_gen6
-# Item 7: PIPE MAC protocol assertions (SVA) exercised against a coherent good scenario
-# (control + Gen5 framing). Needs Verilator --assert. Self-clocking TB via --binary --timing.
+# Item 7: PIPE MAC protocol assertions (SVA) against a good control+framing scenario.
 ASSN_MOD = test/pipe7_mac_bridge_assertions.sv
 ASSN_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv
 ASSN_FILES = $(ASSN_RTL) $(ASSN_MOD) test/pipe7_phy_responder_stub.sv test/tb_pipe7_assertions.sv
@@ -55,55 +56,102 @@ ASSN_TOP = tb_pipe7_assertions
 ASSN_DIR = obj_dir_assn
 UVM_MAKE = $(MAKE) -C test/uvm -f Makefile.vcs
 
-# Default target
+# ---- Waveform build (opt-in tracing of any self-clocking TB) ----
+# Pick the TB with WAVE_TB; each maps to its existing file list / top and an optional
+# per-TB extra arg. TBs dump when built with +define+ENABLE_WAVES (--trace); the VCD path
+# is passed at run time via +wavefile so the Makefile owns the output location.
+WAVE_TB   ?= framing
+WAVE_DIR   = obj_dir_waves
+WAVE_VCD   = waves/$(WAVE_TB).vcd
+WAVE_GTKW  = waves/$(WAVE_TB).gtkw
+WAVE_EXTRA =
+ifeq ($(WAVE_TB),ctrl)
+    WAVE_FILES = $(CTRL_FILES)
+    WAVE_TOP   = $(CTRL_TOP)
+else ifeq ($(WAVE_TB),msgbus)
+    WAVE_FILES = $(MSGBUS_FILES)
+    WAVE_TOP   = $(MSGBUS_TOP)
+else ifeq ($(WAVE_TB),gen6)
+    WAVE_FILES = $(GEN6_FILES)
+    WAVE_TOP   = $(GEN6_TOP)
+else ifeq ($(WAVE_TB),assn)
+    WAVE_FILES = $(ASSN_FILES)
+    WAVE_TOP   = $(ASSN_TOP)
+    WAVE_EXTRA = --assert
+else
+    WAVE_FILES = $(FRAMING_FILES)
+    WAVE_TOP   = $(FRAMING_TOP)
+endif
+
+# Default target: print the grouped help (advanced-repo convention).
+.DEFAULT_GOAL := help
+
+# ============================ Help ============================
+help:
+	@echo "ucie_rdi_to_pcie6_pipe7 — make targets   (default: help)"
+	@echo ""
+	@echo "Build & regression:"
+	@echo "  make regress           lint + all Verilator smokes (release gate; CI runs this)"
+	@echo "  make ci                regress + coverage + NL1 + docs_check (full local run)"
+	@echo "  make verilator         build+run the datapath smoke (alias: sim, smoke)"
+	@echo "  make lint              Verilator -Wall lint of every RTL module + TB (alias: quick)"
+	@echo ""
+	@echo "Per-block smokes (self-clocking, --binary --timing):"
+	@echo "  make verilator_ctrl    PowerDown/Rate/Width control FSM (PhyStatus-gated)"
+	@echo "  make verilator_msgbus  M2P/P2M message-bus master + regfile"
+	@echo "  make verilator_framing Gen5 128b/130b TX framer -> RX deframer round-trip"
+	@echo "  make verilator_gen6    Gen6 (Rate=5) raw wide datapath + L0p + PAM4"
+	@echo "  make verilator_assn    PIPE protocol SVA assertions (Verilator --assert)"
+	@echo ""
+	@echo "Waveforms (GTKWave):"
+	@echo "  make waves   [WAVE_TB=framing|ctrl|msgbus|gen6|assn]"
+	@echo "                         build+run the TB with --trace -> waves/<tb>.vcd"
+	@echo "  make gtkwave [WAVE_TB=...]"
+	@echo "                         waves, then open GTKWave with the waves/<tb>.gtkw layout"
+	@echo "  make wave              open GTKWave on the datapath VCD (obj_dir/dump.vcd)"
+	@echo ""
+	@echo "Coverage & parameter smokes:"
+	@echo "  make coverage          Verilator line coverage -> coverage.info (alias: regress_cov)"
+	@echo "  make coverage_summary  print the per-file line-coverage table"
+	@echo "  make nl1               NUM_LANES=1 parameter smoke (alias: regress_nl1)"
+	@echo ""
+	@echo "Cross-checks & UVM:"
+	@echo "  make cocotb [COCOTB_SIM=verilator|icarus]"
+	@echo "                         Tier 1b PyUVM-on-Cocotb cross-checks (datapath+ctrl+msgbus)"
+	@echo "  make uvm               VCS/UVM compile+run (test/uvm; not in OSS CI)"
+	@echo "  make uvm_compile | uvm_run | uvm_pdf"
+	@echo ""
+	@echo "Formal, docs, vendor sims, utility:"
+	@echo "  make formal            SymbiYosys CDC/FSM proofs (verification/formal)"
+	@echo "  make docs_check        required-docs + stale-claim gate"
+	@echo "  make simv | questa | xsim | vivado    vendor simulator flows"
+	@echo "  make repo_status       git status --short"
+	@echo "  make clean             remove all build artifacts"
+	@echo ""
+	@echo "  Variables: WAVE_TB (waveform TB), COCOTB_SIM, VERILATOR"
+
+# ============================ Workflow aliases ============================
 all: verilator
-
-# Repo workflow aliases
 quick: lint
-
 check: regress
-
 smoke: verilator
-
 test: regress
-
 nl1: regress_nl1
-
-# Standard DV gate aliases (consistent with other RTL repos).
-# coverage: alias for regress_cov (Verilator line coverage).
-coverage: regress_cov
-
-# formal: SymbiYosys formal proofs in verification/formal/.
-#         Checks wr_ready/wr_full polarity and output stability (rd_valid,
-#         rd_data, rd_error held when rd_ready is low) for ucie_rdi_fifo_cdc.
-#         Uses a plain-Verilog model (struct literals / 'return' unsupported by Yosys).
-formal:
-	@if command -v sby >/dev/null 2>&1; then \
-		$(MAKE) -C $(CURDIR)/verification/formal; \
-	else \
-		echo "[FORMAL] sby not found; install SymbiYosys (OSS CAD Suite) to run formal"; \
-		echo "         Properties are in verification/formal/fifo_cdc_props.sv"; \
-		exit 0; \
-	fi
-
-# Full local confidence run. This is intentionally heavier than CI's first gate.
-ci: regress regress_cov regress_nl1 coverage_summary docs_check
-
+sim: verilator                 # DV_STANDARDS: sim = Verilator OSS sim
+coverage: regress_cov          # alias for Verilator line coverage
 regress_all: ci
 
-# Release regression (lint + Verilator datapath + control-plane + message-bus + framing + Gen6 + assertions); CI runs this.
+# ============================ Gates ============================
+# Release regression (lint + every Verilator smoke); CI runs this.
 regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_gen6 verilator_assn
 
-# Standard DV alias (DV_STANDARDS.md): sim = Verilator OSS sim.
-sim: verilator
+# Full local confidence run (heavier than CI's first gate).
+ci: regress regress_cov regress_nl1 coverage_summary docs_check
 
-# Lint + Verilator with coverage (writes obj_dir_cov/coverage.dat; optional coverage.info).
 regress_cov: lint verilator_cov
-
-# NUM_LANES=1 compile + minimal smoke (lint includes nl1 TB pass).
 regress_nl1: lint verilator_nl1
 
-# Verilator Simulation
+# ============================ Verilator smokes ============================
 verilator:
 	@echo "========== Compiling with Verilator =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
@@ -129,8 +177,7 @@ verilator_nl1:
 	@echo "Running Verilator NL1 simulation..."
 	cd $(NL1_DIR) && ./$(NL1_TOP)
 
-# Item 3: control-plane smoke -- PhyStatus-gated PowerDown/Rate/Width FSM against the
-# non-UVM PHY-responder stub. Self-clocking TB via --binary --timing; $fatal on mismatch.
+# Item 3: control-plane smoke -- PhyStatus-gated PowerDown/Rate/Width FSM.
 verilator_ctrl:
 	@echo "========== Verilator control-plane smoke (PhyStatus-gated FSM) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
@@ -141,8 +188,7 @@ verilator_ctrl:
 	@echo "Running Verilator control-plane smoke..."
 	./$(CTRL_DIR)/ctrl_sim
 
-# Item 4: message-bus smoke -- M2P/P2M framing round-trip through the master + regfile against
-# the non-UVM PHY message-bus responder stub. Self-clocking TB via --binary --timing.
+# Item 4: message-bus smoke -- M2P/P2M framing round-trip through master + regfile.
 verilator_msgbus:
 	@echo "========== Verilator message-bus smoke (M2P/P2M framing) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
@@ -153,8 +199,7 @@ verilator_msgbus:
 	@echo "Running Verilator message-bus smoke..."
 	./$(MSGBUS_DIR)/msgbus_sim
 
-# Item 5: Gen5 128b/130b framing smoke -- TX framer -> RX deframer loopback round-trip.
-# Self-clocking TB via --binary --timing; $fatal on mismatch.
+# Item 5: Gen5 128b/130b framing smoke -- TX framer -> RX deframer loopback.
 verilator_framing:
 	@echo "========== Verilator framing smoke (Gen5 128b/130b round-trip) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
@@ -165,8 +210,7 @@ verilator_framing:
 	@echo "Running Verilator framing smoke..."
 	./$(FRAMING_DIR)/framing_sim
 
-# Item 6: Gen6 datapath smoke -- Gen6 rate + L0p width via the ctrl FSM, then the raw wide
-# datapath round-trip + PAM4RestrictedLevels carry. Self-clocking TB via --binary --timing.
+# Item 6: Gen6 datapath smoke -- Gen6 rate + L0p width via ctrl FSM, then wide round-trip.
 verilator_gen6:
 	@echo "========== Verilator Gen6 smoke (Rate=5 raw wide datapath + PAM4) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
@@ -177,8 +221,7 @@ verilator_gen6:
 	@echo "Running Verilator Gen6 smoke..."
 	./$(GEN6_DIR)/gen6_sim
 
-# Item 7: protocol-assertion smoke -- SVA checker against a good control+framing scenario.
-# --assert enables SVA; a violation $fatals with non-zero exit. Non-vacuity is TB-checked.
+# Item 7: protocol-assertion smoke -- SVA checker (--assert), $fatal on violation.
 verilator_assn:
 	@echo "========== Verilator protocol-assertion smoke (SVA) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
@@ -218,7 +261,7 @@ coverage_summary:
 	@awk 'BEGIN{lines=0;hit=0} /^DA:/ {split($$0,a,":"); split(a[2],b,","); lines++; if (b[2] > 0) hit++} END{printf "Line coverage: %d/%d = %.2f%%\n", hit, lines, (lines?100*hit/lines:0)}' coverage.info
 	@awk 'function flush(){if(file != ""){printf "  %-55s %4d/%-4d %6.2f%%\n", file, hit, lines, (lines?100*hit/lines:0)}} /^SF:/ {flush(); file=substr($$0,4); lines=0; hit=0} /^DA:/ {split($$0,a,":"); split(a[2],b,","); lines++; if (b[2] > 0) hit++} END{flush()}' coverage.info
 
-# Same as verilator with debug-friendly C++ flags
+# Same as verilator with debug-friendly C++ flags.
 verilator_debug:
 	@echo "========== Compiling with Verilator (debug) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
@@ -230,36 +273,39 @@ verilator_debug:
 	@echo "Running Verilator simulation..."
 	./$(VERILATOR_DIR)/$(TOP_MODULE)
 
-# View waveforms (GTKWave; VCD from sim_main.cpp)
+# ============================ Waveforms ============================
+# waves: build the selected self-clocking TB with tracing (+define+ENABLE_WAVES arms the
+# TB's $dumpvars) and run it, writing waves/<tb>.vcd. gtkwave then opens it with the saved
+# waves/<tb>.gtkw signal layout. `wave` (singular) is the legacy datapath-smoke VCD viewer.
+waves:
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
+	@mkdir -p waves
+	rm -rf $(WAVE_DIR)
+	$(VERILATOR) --binary --timing --trace $(WAVE_EXTRA) -Isrc \
+		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		+define+ENABLE_WAVES --top-module $(WAVE_TOP) --Mdir $(WAVE_DIR) -o wave_sim $(WAVE_FILES)
+	@echo "Running $(WAVE_TOP) with tracing (WAVE_TB=$(WAVE_TB))..."
+	./$(WAVE_DIR)/wave_sim +wavefile=$(WAVE_VCD)
+	@echo "[WAVES] wrote $(WAVE_VCD)"
+
+gtkwave: waves
+	@if ! command -v gtkwave >/dev/null 2>&1; then \
+		echo "[GTKWAVE] gtkwave not on PATH; VCD is at $(WAVE_VCD)"; exit 0; \
+	fi; \
+	if [ -f $(WAVE_GTKW) ]; then \
+		echo "[GTKWAVE] opening $(WAVE_VCD) with layout $(WAVE_GTKW)"; \
+		gtkwave $(WAVE_VCD) $(WAVE_GTKW) & \
+	else \
+		echo "[GTKWAVE] no saved layout $(WAVE_GTKW); opening $(WAVE_VCD)"; \
+		gtkwave $(WAVE_VCD) & \
+	fi
+
+# Legacy: open GTKWave on the datapath smoke's VCD (from sim_main.cpp).
 wave:
-	@echo "Opening GTKWave..."
+	@echo "Opening GTKWave on $(VERILATOR_DIR)/dump.vcd..."
 	gtkwave $(VERILATOR_DIR)/dump.vcd &
 
-# VCS Simulation (requires Synopsys VCS)
-simv:
-	@echo "========== Compiling with VCS =========="
-	vcs -sverilog -debug_all -cm line+tgl -top $(TOP_SIMV) $(VERILOG_SIMV)
-	@echo "Running VCS simulation..."
-	./simv -gui &
-
-# Mentor ModelSim/QuestaSim
-questa:
-	@echo "========== Compiling with QuestaSim =========="
-	vlog -sv $(VERILOG_SIMV)
-	vsim -c $(TOP_SIMV) -do "run -all; quit"
-
-# Cadence Xcelium
-xsim:
-	@echo "========== Compiling with Cadence Xcelium =========="
-	xmvlog -sv $(VERILOG_SIMV)
-	xmsim $(TOP_SIMV)
-
-# Vivado Simulation (Xilinx)
-vivado:
-	@echo "========== Setting up Vivado Simulation =========="
-	@echo "Note: Add files manually to Vivado project"
-	@echo "Source files: $(VERILOG_FILES)"
-
+# ============================ Lint ============================
 lint:
 	@if [ -z "$(VERILATOR)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
 	$(VERILATOR) --lint-only -Wall -Isrc --top-module ucie_rdi_to_pipe7_mac_bridge $(VERILOG_RTL)
@@ -275,9 +321,9 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_gen6_datapath src/pipe7_pkg.sv src/pipe7_gen6_datapath.sv
 	$(VERILATOR) --lint-only -Wall --assert -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_bridge_assertions src/pipe7_pkg.sv $(ASSN_MOD)
 
+# ============================ Cross-checks & UVM ============================
 # Tier 1b: PyUVM-on-Cocotb cross-check (closure-plan items 13-14). Runs the PyUVM env against
 # the RTL via cocotb on an OSS simulator -- actually executes here (unlike the VCS/UVM tier).
-# Advisory: kept OUT of `regress` until promoted to a gate. Needs cocotb + pyuvm on PATH.
 COCOTB_SIM ?= verilator
 cocotb:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -297,6 +343,18 @@ uvm: uvm_compile uvm_run
 uvm_pdf docs_pdf:
 	$(UVM_MAKE) pdf
 
+# ============================ Formal ============================
+# SymbiYosys formal proofs in verification/formal/ (CDC buffer + FSM invariants).
+formal:
+	@if command -v sby >/dev/null 2>&1; then \
+		$(MAKE) -C $(CURDIR)/verification/formal; \
+	else \
+		echo "[FORMAL] sby not found; install SymbiYosys (OSS CAD Suite) to run formal"; \
+		echo "         Properties are in verification/formal/fifo_cdc_props.sv"; \
+		exit 0; \
+	fi
+
+# ============================ Docs ============================
 docs_check:
 	@echo "========== Checking documentation links and stale claims =========="
 	@test -f README.md
@@ -308,52 +366,38 @@ docs_check:
 	@! grep -R "mirrors the coverage of the original SystemVerilog testbench" README.md docs >/dev/null
 	@echo "Documentation check passed"
 
+# ============================ Vendor simulators ============================
+simv:
+	@echo "========== Compiling with VCS =========="
+	vcs -sverilog -debug_all -cm line+tgl -top $(TOP_SIMV) $(VERILOG_SIMV)
+	@echo "Running VCS simulation..."
+	./simv -gui &
+
+questa:
+	@echo "========== Compiling with QuestaSim =========="
+	vlog -sv $(VERILOG_SIMV)
+	vsim -c $(TOP_SIMV) -do "run -all; quit"
+
+xsim:
+	@echo "========== Compiling with Cadence Xcelium =========="
+	xmvlog -sv $(VERILOG_SIMV)
+	xmsim $(TOP_SIMV)
+
+vivado:
+	@echo "========== Setting up Vivado Simulation =========="
+	@echo "Note: Add files manually to Vivado project"
+	@echo "Source files: $(VERILOG_FILES)"
+
+# ============================ Utility ============================
 repo_status:
 	@git status --short
 
-# Clean up simulation artifacts
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(GEN6_DIR) $(ASSN_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(GEN6_DIR) $(ASSN_DIR) $(WAVE_DIR)
 	rm -f coverage.info
+	rm -f waves/*.vcd
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb
 	rm -rf xsim.dir transcript xsim_*.log
 	rm -rf work *.ucdb
 	@echo "Clean complete"
-
-help:
-	@echo "Available targets:"
-	@echo "  make quick              - lint only"
-	@echo "  make check              - alias for regress"
-	@echo "  make test               - alias for regress"
-	@echo "  make ci                 - regress + coverage + NL1 + docs check"
-	@echo "  make regress             - lint + Verilator datapath + control-plane + message-bus smokes (release gate)"
-	@echo "  make verilator_ctrl      - control-plane smoke: PhyStatus-gated FSM + PHY-responder stub"
-	@echo "  make verilator_msgbus    - message-bus smoke: M2P/P2M framing master + regfile + responder stub"
-	@echo "  make verilator_framing   - framing smoke: Gen5 128b/130b TX framer -> RX deframer round-trip"
-	@echo "  make verilator_gen6      - Gen6 smoke: Rate=5 raw wide datapath + L0p width + PAM4 config"
-	@echo "  make verilator_assn      - protocol-assertion smoke: SVA (no-Tx-in-EI, rate/PD, PhyStatus bound, sync)"
-	@echo "  make regress_cov         - lint + Verilator sim with coverage (+ coverage.info if tool present)"
-	@echo "  make regress_nl1         - lint + NUM_LANES=1 Verilator smoke"
-	@echo "  make regress_all         - alias for ci"
-	@echo "  make coverage_summary    - summarize coverage.info"
-	@echo "  make docs_check          - check required docs and stale claims"
-	@echo "  make cocotb             - Tier 1b PyUVM-on-Cocotb cross-check (SIM=verilator|icarus; advisory)"
-	@echo "  make uvm                - VCS/UVM compile + run via test/uvm/Makefile.vcs"
-	@echo "  make uvm_compile        - VCS/UVM compile only"
-	@echo "  make uvm_run            - VCS/UVM run only"
-	@echo "  make uvm_pdf            - build UVM README PDF via pandoc"
-	@echo "  make repo_status        - git status --short"
-	@echo "  make verilator_nl1       - NUM_LANES=1 build/run only (after lint)"
-	@echo "  make verilator          - Compile and simulate with Verilator (default)"
-	@echo "  make verilator_debug    - Verilator with g++ -g -O0"
-	@echo "  make wave               - Open GTKWave on obj_dir/dump.vcd"
-	@echo "  make lint               - Verilator -Wall (RTL + assertions + TB/scoreboard)"
-	@echo "  make simv               - VCS"
-	@echo "  make questa             - QuestaSim"
-	@echo "  make xsim               - Xcelium"
-	@echo "  make vivado             - Vivado hints"
-	@echo "  make clean              - Remove build artifacts"
-	@echo "  make help               - This message"
-
-.DEFAULT_GOAL := all

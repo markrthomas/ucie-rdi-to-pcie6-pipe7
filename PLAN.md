@@ -270,6 +270,16 @@ CI job (`pip install -r test/cocotb/requirements.txt`, then `make cocotb SIM=ver
 runs as **`continue-on-error: true`** advisory at first and is promoted to a required gate
 once stable — it must never block the Verilator release gate while being brought up.
 
+**Makefile developer-experience conventions (adopted from the sibling repos, e.g.
+`cxl_lpddr5x_bridge`).** `make` with no target prints a **grouped, formatted target list**
+(`.DEFAULT_GOAL := help`). Waveform debug is first-class: **`make waves WAVE_TB=<tb>`** builds
+the selected self-clocking TB with `--trace` (`+define+ENABLE_WAVES` arms an opt-in
+`$dumpvars`; the VCD path is passed at run time via `+wavefile`) and writes `waves/<tb>.vcd`;
+**`make gtkwave WAVE_TB=<tb>`** opens it in GTKWave with a **saved, formatted `waves/<tb>.gtkw`
+signal layout** (grouped clock/request/state/response sections, hex buses). Layouts are
+committed for `framing`/`ctrl`/`msgbus`; other TBs open without a saved layout. The generated
+VCDs are git-ignored; the `.gtkw` files are tracked.
+
 ---
 
 ## Phased closure plan (one numbered item per commit)

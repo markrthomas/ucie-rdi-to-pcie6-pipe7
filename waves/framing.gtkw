@@ -1,0 +1,46 @@
+[*]
+[*] GTKWave save file — tb_pipe7_framing : Gen5 128b/130b framing round-trip
+[*] Open via:  make gtkwave WAVE_TB=framing
+[*]
+[dumpfile] "framing.vcd"
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 280
+[signals_width] 340
+[sst_expanded] 1
+@200
+-Clock / Reset
+@28
+tb_pipe7_framing.clk
+tb_pipe7_framing.reset_n
+@200
+-Payload in  (RDI -> framer)
+@28
+tb_pipe7_framing.pl_valid_i
+tb_pipe7_framing.pl_is_os_i
+tb_pipe7_framing.pl_ready_i
+@22
+tb_pipe7_framing.pl_data_i[127:0]
+@200
+-PIPE stream  (framer -> deframer, 80b words, blocks straddle boundaries)
+@28
+tb_pipe7_framing.stream_valid
+@22
+tb_pipe7_framing.stream[79:0]
+@200
+-Payload out  (deframer -> RDI)
+@28
+tb_pipe7_framing.pl_valid_o
+tb_pipe7_framing.pl_is_os_o
+tb_pipe7_framing.blk_locked_o
+tb_pipe7_framing.sync_err_o
+@22
+tb_pipe7_framing.pl_data_o[127:0]
+@200
+-Scoreboard
+@28
+tb_pipe7_framing.recv
+tb_pipe7_framing.errors
+[pattern_trace] 1
+[pattern_trace] 0

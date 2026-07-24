@@ -24,6 +24,16 @@ module tb_pipe7_ctrl_fsm;
     initial pclk = 1'b0;
     always #5 pclk = ~pclk;
 
+`ifdef ENABLE_WAVES
+    // Opt-in waveform dump: build with +define+ENABLE_WAVES --trace (see `make waves`).
+    initial begin
+        string wf;
+        if ($value$plusargs("wavefile=%s", wf)) $dumpfile(wf);
+        else                                     $dumpfile("waves.vcd");
+        $dumpvars(0, tb_pipe7_ctrl_fsm);
+    end
+`endif
+
     int errors;
     int comp_ok;   // legal requests that completed (done)
     int err_ok;    // illegal requests that were rejected (req_error)
