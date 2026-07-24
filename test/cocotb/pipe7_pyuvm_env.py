@@ -73,11 +73,21 @@ class DatapathScoreboard(uvm_scoreboard):
             f"[SB] driven={len(expected)} recovered={len(actual)} "
             f"stream_words={len(stream)} model_words={len(model_stream)}")
 
+        # Monitor-derived invariants (scoreboard is a leaf; pyuvm runs check_phase top-down,
+        # so all pass/fail assertions live here rather than in the test's check_phase).
+        mon = ConfigDB().get(self, "", "OUT_MON")
+        if mon.sync_errors != 0:
+            self.errors.append(f"DUT raised sync_error {mon.sync_errors} time(s)")
+        if not mon.saw_lock:
+            self.errors.append("deframer never reached block lock")
+        if len(expected) == 0:
+            self.errors.append("no payloads driven (empty run)")
+
+        assert not self.errors, \
+            "datapath cross-check failed:\n  " + "\n  ".join(self.errors)
+
     def report_phase(self):
-        if self.errors:
-            for e in self.errors:
-                self.logger.error(f"[SB] {e}")
-        else:
+        if not self.errors:
             self.logger.info("[SB] datapath cross-check PASS (3-way agreement)")
 
 

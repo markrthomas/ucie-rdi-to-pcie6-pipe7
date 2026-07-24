@@ -284,7 +284,7 @@ cocotb:
 		echo "[COCOTB] cocotb not found; pip install -r test/cocotb/requirements.txt to run Tier 1b"; \
 		exit 0; \
 	fi
-	$(MAKE) -C test/cocotb SIM=$(COCOTB_SIM) MODULE=test_datapath
+	$(MAKE) -C test/cocotb SIM=$(COCOTB_SIM) all_tests
 
 uvm_compile:
 	$(UVM_MAKE) compile

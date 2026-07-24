@@ -58,14 +58,14 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: make verilator_nl1
 
-  # Tier 1b: PyUVM-on-Cocotb cross-check. Advisory (continue-on-error) while brought up, per
-  # PLAN.md -- it must never block the Verilator release gate. Promoted to a required gate once
-  # green and stable. Uses a system Python (cocotb-config must own the makefile flow) + the
-  # OSS CAD Suite Verilator.
+  # Tier 1b: PyUVM-on-Cocotb cross-check. Promoted from advisory to a REQUIRED gate now that
+  # all three cross-checks (datapath / control-plane / message-bus) are green and stable
+  # (PLAN.md item 14). Uses a system Python (cocotb-config owns the makefile flow) + the OSS
+  # CAD Suite Verilator. It still runs as a separate job, so it never blocks the pure-Verilator
+  # release gate (`sim`) from reporting independently.
   cocotb:
     needs: sim
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -76,9 +76,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install cocotb + pyuvm
+      - name: Install cocotb + pyuvm + cocotb-coverage
         run: pip install -r test/cocotb/requirements.txt
 
-      - name: PyUVM datapath cross-check (Verilator)
+      - name: PyUVM cross-checks (datapath + control-plane + message-bus, Verilator)
         working-directory: ${{ github.workspace }}
-        run: make -C test/cocotb SIM=verilator MODULE=test_datapath
+        run: make -C test/cocotb SIM=verilator all_tests

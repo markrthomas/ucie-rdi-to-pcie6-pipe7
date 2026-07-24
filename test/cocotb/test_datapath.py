@@ -60,9 +60,6 @@ class DatapathTest(uvm_test):
         except OSError:
             pass
 
-    def check_phase(self):
-        mon = ConfigDB().get(self, "", "OUT_MON")
-        assert mon.sync_errors == 0, f"DUT raised sync_error {mon.sync_errors} time(s)"
-        assert mon.saw_lock, "deframer never reached block lock"
-        assert not self.env.sb.errors, \
-            "datapath cross-check failed:\n  " + "\n  ".join(self.env.sb.errors)
+    # Pass/fail assertions live in DatapathScoreboard.check_phase (a leaf) -- pyuvm runs
+    # check_phase top-down, so the test's own check_phase would read scoreboard results before
+    # the scoreboard computes them.

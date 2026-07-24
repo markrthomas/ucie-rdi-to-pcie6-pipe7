@@ -27,21 +27,32 @@ vectors/                 exported golden vectors (shared-stimulus cross-check mo
 ```
 pip install -r requirements.txt          # into the Python that owns cocotb-config
 make                                      # datapath cross-check, Verilator
-make SIM=icarus                           # alternate simulator
-make MODULE=test_datapath                 # explicit test
+make all_tests                            # all three cross-checks (or `make cocotb` from repo root)
+make MODULE=test_ctrl_plane               # a specific cross-check
+make SIM=icarus ...                       # alternate simulator
 ```
 
-## Cross-check (item 13, datapath)
+## Cross-checks
 
-The scoreboard performs a **three-way** check so a common-mode framing bug cannot pass:
-
+**Datapath (item 13, `test_datapath.py`)** — a **three-way** check so a common-mode framing bug
+cannot pass:
 1. **round-trip identity** — DUT recovered payloads == driven payloads.
-2. **framer vs Python model** — the DUT's raw `TxData` word stream == `framing_model.frame_stream`
-   of the driven payloads, **bit-exact**.
+2. **framer vs Python model** — the DUT's raw `TxData` word stream == `framing_model.frame_stream`,
+   **bit-exact**.
 3. **Python deframe vs DUT** — `framing_model.deframe_stream` of the DUT's own stream == the
-   DUT's recovered payloads, and every sync header is legal.
+   DUT's recovered payloads, all sync headers legal.
 
-Any disagreement localizes the bug to exactly one of {DUT, SV-TB, Python-TB}. The seeded
-sequence also exports the exact stimulus to `vectors/datapath_vectors.txt` for the SV/UVM env
-(shared-golden-vector mode). Control-plane, message-bus, and coverage-parity cross-checks are
-item 14.
+**Control-plane (item 14, `test_ctrl_plane.py`)** — PowerDown/Rate/Width requests answered by an
+**independently-authored** PyUVM `PhyStatusResponder`; each request's outcome (done vs reject)
+and command state cross-checked against `ctrl_plane_model` (13 requests, 2 rejects).
+
+**Message-bus (item 14, `test_msgbus.py`)** — register read/writes answered by an independent
+PyUVM `MsgbusResponder`; the M2P byte framing is decoded independently and checked against
+`msgbus_model.encode_m2p`, plus read data / a committed-write→read round-trip vs a register model.
+
+Each cross-check ends with a `cocotb-coverage` bin-parity check. The datapath sequence also
+exports its stimulus to `vectors/datapath_vectors.txt` (shared-golden-vector mode).
+
+> pyuvm note: `check_phase` runs **top-down** (parent before child), so all pass/fail assertions
+> live in the leaf scoreboards' `check_phase` — asserting in the test's own `check_phase` would
+> read scoreboard results before they are computed (a silent vacuous pass).

@@ -2,42 +2,55 @@
 # Runs the PyUVM (UVM 1.2 in Python) env against the RTL via cocotb on an open-source
 # simulator, so unlike the VCS/UVM tier this actually executes in OSS CI.
 #
-#   make            # default: datapath cross-check (item 13), SIM=verilator
-#   make SIM=icarus # alternate simulator
-#   make datapath   # item 13: Gen5 128b/130b framing round-trip vs independent Python model
+#   make                     # default: datapath cross-check (item 13), SIM=verilator
+#   make MODULE=test_ctrl_plane   # control-plane cross-check (item 14)
+#   make MODULE=test_msgbus       # message-bus cross-check (item 14)
+#   make SIM=icarus ...           # alternate simulator
+#   make all_tests                # run all three sequentially
 #
-# Requires: cocotb + pyuvm (see requirements.txt), and verilator or iverilog on PATH.
+# Requires: cocotb + pyuvm (+ cocotb-coverage) -- see requirements.txt -- and verilator or
+# iverilog on PATH.
 
 SIM           ?= verilator
 TOPLEVEL_LANG ?= verilog
+MODULE        ?= test_datapath
 
 ROOT := $(shell cd ../.. && pwd)
 SRC  := $(ROOT)/src
 HDL  := $(ROOT)/test/cocotb/hdl
 
-# Shared RTL + the cocotb DUT wrapper.
-VERILOG_SOURCES  = $(SRC)/pipe7_pkg.sv
-VERILOG_SOURCES += $(SRC)/pipe7_tx_framer.sv
-VERILOG_SOURCES += $(SRC)/pipe7_rx_deframer.sv
-VERILOG_SOURCES += $(HDL)/pipe7_framing_top.sv
-
-TOPLEVEL = pipe7_framing_top
-MODULE  ?= test_datapath
+# Per-test DUT sources + top. Each test drives a thin wrapper over the relevant RTL.
+ifeq ($(MODULE),test_ctrl_plane)
+    VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_mac_ctrl_fsm.sv $(HDL)/pipe7_ctrl_top.sv
+    TOPLEVEL = pipe7_ctrl_top
+else ifeq ($(MODULE),test_msgbus)
+    VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_msgbus_master.sv $(SRC)/pipe7_regfile.sv $(HDL)/pipe7_msgbus_top.sv
+    TOPLEVEL = pipe7_msgbus_top
+else
+    VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_tx_framer.sv $(SRC)/pipe7_rx_deframer.sv $(HDL)/pipe7_framing_top.sv
+    TOPLEVEL = pipe7_framing_top
+endif
 
 # Make our Python packages (models/, agents/, seq_lib/) importable by the test module.
 export PYTHONPATH := $(ROOT)/test/cocotb:$(PYTHONPATH)
 
-# Verilator: our RTL is -Wall clean except the pkg's BUFFER_DEPTH (used by other modules);
-# keep warnings non-fatal for the cocotb build and enable SystemVerilog assertions off.
 ifeq ($(SIM),verilator)
-    EXTRA_ARGS += --trace --trace-structs -Wno-UNUSEDPARAM -Wno-fatal
+    EXTRA_ARGS += -Wno-UNUSEDPARAM -Wno-fatal
 endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
-# cocotb's `sim` target runs the MODULE test. Default to the datapath cross-check; override
-# MODULE on the command line (e.g. `make MODULE=test_flow`) or use the alias below.
 .DEFAULT_GOAL := sim
 
-.PHONY: datapath
-datapath: sim
+# Each test drives a different TOPLEVEL, so sim_build must be cleaned between them.
+.PHONY: datapath ctrl_plane msgbus all_tests
+datapath:
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_datapath
+ctrl_plane:
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_ctrl_plane
+msgbus:
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_msgbus
+all_tests:
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_datapath
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_ctrl_plane
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_msgbus

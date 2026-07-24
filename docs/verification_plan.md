@@ -28,17 +28,27 @@ GitHub Actions runs **`make regress`** on push/PR to `main` / `master`, then **`
 | Verilator smoke | Root `Makefile`, `test/tb_ucie_rdi_to_pcie_pipe_bridge.sv` | Verilator | Fast RTL lint, smoke stimulus, scoreboard, CRC lane-0 mirror, FIFO stress | Current CI/release gate |
 | NUM_LANES=1 smoke | Root `Makefile`, `test/tb_ucie_rdi_to_pcie_pipe_nl1.sv` | Verilator | Parameter-width smoke with assertion monitor | Current CI side gate |
 | UVM | `test/uvm/` | VCS/UVM 1.2 | TX-path UVM smoke, CDC assertions, and extensibility scaffold | Manual, not in open-source CI |
-| **PyUVM cross-check (Tier 1b)** | `test/cocotb/` | Verilator (default) / Icarus | **Item 13 delivered & runnable here:** PyUVM env (UVM 1.2 in Python on cocotb) with an independent Python **framing** model 3-way cross-checking the Gen5 datapath (`make cocotb`). Control-plane + message-bus models + PyUVM PHY-responder agent + `cocotb-coverage` parity are item 14. | Advisory OSS CI job (`continue-on-error`), promoted to gate once stable |
+| **PyUVM cross-check (Tier 1b)** | `test/cocotb/` | Verilator (default) / Icarus | **Items 13–14 delivered & runnable here:** PyUVM env with independent Python models cross-checking the **datapath** (3-way framing), **control-plane** (PowerDown/Rate/Width legality vs an independent PhyStatus responder), and **message-bus** (M2P/P2M framing + register round-trip vs an independent responder), each with a `cocotb-coverage` bin-parity check. `make cocotb` runs all three. | **Required** OSS CI job (promoted from advisory) |
 
 Detailed UVM architecture, component roles, sequence matrix, and closure gaps are documented in `docs/uvm_verification.md`.
 
-**Tier 1b — PyUVM-on-Cocotb parallel cross-check (item 13 delivered; runnable here).** A third,
-open-source-*runnable* tier built with **PyUVM** (UVM 1.2 in Python, on cocotb). The Gen5
-datapath cross-check is live (`make cocotb` → `test/cocotb/test_datapath.py`): a PyUVM env
-whose scoreboard performs a **three-way** agreement check (DUT round-trip identity; DUT `TxData`
-stream vs an independent Python framer, bit-exact; Python deframe of the DUT stream vs the DUT
-deframer) so a common-mode framing bug cannot pass silently. Control-plane, message-bus, and
-`cocotb-coverage` parity are item 14. Its job is independent-implementation
+**Tier 1b — PyUVM-on-Cocotb parallel cross-check (items 13–14 delivered; runnable here).** A
+third, open-source-*runnable* tier built with **PyUVM** (UVM 1.2 in Python, on cocotb). Three
+cross-checks execute via `make cocotb` (each with a `cocotb-coverage` bin-parity check):
+
+- **Datapath** (`test_datapath.py`) — a **three-way** agreement check: DUT round-trip identity;
+  DUT `TxData` stream vs an independent Python framer (bit-exact); Python deframe of the DUT
+  stream vs the DUT deframer. A common-mode framing bug cannot pass silently.
+- **Control-plane** (`test_ctrl_plane.py`) — PowerDown/Rate/Width requests answered by an
+  **independently-authored** PyUVM `PhyStatusResponder`; per-request outcome (done vs reject)
+  and command state cross-checked against an independent legality model (13 requests, 2 rejects).
+- **Message-bus** (`test_msgbus.py`) — register read/writes answered by an independent PyUVM
+  `MsgbusResponder`; the M2P byte framing is decoded independently and checked against the
+  model's encoding, and read data / a committed-write→read round-trip against a register model.
+
+A key pyuvm gotcha handled here: `check_phase` runs **top-down** (parent before child), so all
+pass/fail assertions live in the leaf scoreboards' `check_phase`, not the test's — otherwise the
+test would read scoreboard results before they are computed (a silent vacuous pass). Its job is independent-implementation
 diversity: a reference model and scoreboard authored independently of the SystemVerilog env —
 in Python, on a different simulator — makes a common-mode modelling bug (the same wrong
 assumption in both DUT and its SV checker) far less likely to pass silently. Using PyUVM (not
