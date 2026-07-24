@@ -1,5 +1,5 @@
 
-.PHONY: all check ci clean coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_gen6 verilator_msgbus verilator_nl1 vivado wave xsim questa
+.PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_gen6 verilator_msgbus verilator_nl1 vivado wave xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
 VERILATOR_ROOT := $(shell if [ -n "$(VERILATOR)" ]; then realpath "$$(dirname "$(VERILATOR)")/../share/verilator"; fi)
@@ -275,6 +275,17 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_gen6_datapath src/pipe7_pkg.sv src/pipe7_gen6_datapath.sv
 	$(VERILATOR) --lint-only -Wall --assert -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_bridge_assertions src/pipe7_pkg.sv $(ASSN_MOD)
 
+# Tier 1b: PyUVM-on-Cocotb cross-check (closure-plan items 13-14). Runs the PyUVM env against
+# the RTL via cocotb on an OSS simulator -- actually executes here (unlike the VCS/UVM tier).
+# Advisory: kept OUT of `regress` until promoted to a gate. Needs cocotb + pyuvm on PATH.
+COCOTB_SIM ?= verilator
+cocotb:
+	@if ! command -v cocotb-config >/dev/null 2>&1; then \
+		echo "[COCOTB] cocotb not found; pip install -r test/cocotb/requirements.txt to run Tier 1b"; \
+		exit 0; \
+	fi
+	$(MAKE) -C test/cocotb SIM=$(COCOTB_SIM) MODULE=test_datapath
+
 uvm_compile:
 	$(UVM_MAKE) compile
 
@@ -327,6 +338,7 @@ help:
 	@echo "  make regress_all         - alias for ci"
 	@echo "  make coverage_summary    - summarize coverage.info"
 	@echo "  make docs_check          - check required docs and stale claims"
+	@echo "  make cocotb             - Tier 1b PyUVM-on-Cocotb cross-check (SIM=verilator|icarus; advisory)"
 	@echo "  make uvm                - VCS/UVM compile + run via test/uvm/Makefile.vcs"
 	@echo "  make uvm_compile        - VCS/UVM compile only"
 	@echo "  make uvm_run            - VCS/UVM run only"

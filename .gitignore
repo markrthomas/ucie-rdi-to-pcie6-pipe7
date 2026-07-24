@@ -28,6 +28,14 @@ xsim_*.log
 # Formal (SymbiYosys)
 verification/formal/*_out/
 
+# Cocotb (Tier 1b PyUVM-on-Cocotb)
+test/cocotb/sim_build/
+test/cocotb/results.xml
+test/cocotb/**/__pycache__/
+test/cocotb/__pycache__/
+test/cocotb/dump.vcd
+test/cocotb/vectors/*.txt
+
 # This Env
 NOTES.md
 

@@ -57,3 +57,28 @@ jobs:
       - name: NUM_LANES=1 smoke (make verilator_nl1)
         working-directory: ${{ github.workspace }}
         run: make verilator_nl1
+
+  # Tier 1b: PyUVM-on-Cocotb cross-check. Advisory (continue-on-error) while brought up, per
+  # PLAN.md -- it must never block the Verilator release gate. Promoted to a required gate once
+  # green and stable. Uses a system Python (cocotb-config must own the makefile flow) + the
+  # OSS CAD Suite Verilator.
+  cocotb:
+    needs: sim
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OSS CAD Suite (verilator, iverilog, sby)
+        uses: YosysHQ/setup-oss-cad-suite@v3
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install cocotb + pyuvm
+        run: pip install -r test/cocotb/requirements.txt
+
+      - name: PyUVM datapath cross-check (Verilator)
+        working-directory: ${{ github.workspace }}
+        run: make -C test/cocotb SIM=verilator MODULE=test_datapath

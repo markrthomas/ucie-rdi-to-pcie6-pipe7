@@ -1,0 +1,6 @@
+# Tier 1b -- PyUVM-on-Cocotb cross-check (closure-plan items 13-14).
+# Install into the same Python that owns `cocotb-config` on PATH, then run `make` here
+# (SIM=verilator default, SIM=icarus alternate).
+cocotb>=1.9,<3.0
+pyuvm>=4.0,<5.0
+cocotb-coverage>=1.1.0   # coverage-parity check (item 14)
