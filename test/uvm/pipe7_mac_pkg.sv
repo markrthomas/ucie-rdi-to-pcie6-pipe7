@@ -202,6 +202,11 @@ package pipe7_mac_pkg;
             cp_pd: coverpoint cur.power_down {
                 bins p0 = {0}; bins p0s = {1}; bins p1 = {2}; bins p2 = {3};
             }
+            // Framing mode: Gen5 is 128b/130b block-coded; Gen6 is raw wide (no sync header).
+            cp_framing_mode: coverpoint cur.rate {
+                bins gen5_130b = {4};
+                bins gen6_wide = {5};
+            }
             x_rate_width: cross cp_rate, cp_width;
         endgroup
 
@@ -214,9 +219,14 @@ package pipe7_mac_pkg;
             cur = t;
             cg_ctrl.sample();
         endfunction
+
+        function void report_phase(uvm_phase phase);
+            `uvm_info("COV", $sformatf("cg_ctrl (Rate/Width/PowerDown/framing): %0.1f%%",
+                                       cg_ctrl.get_coverage()), UVM_LOW)
+        endfunction
     endclass
 
-    // is_os / framing-mode coverage off the recovered RDI stream.
+    // Block-type (data vs ordered-set sync header) coverage off the recovered RDI stream.
     class pipe7_framing_coverage extends uvm_subscriber #(rdi_transaction);
         `uvm_component_utils(pipe7_framing_coverage)
         rdi_transaction cur;
@@ -230,6 +240,70 @@ package pipe7_mac_pkg;
         function void write(rdi_transaction t);
             cur = t;
             cg_frame.sample();
+        endfunction
+        function void report_phase(uvm_phase phase);
+            `uvm_info("COV", $sformatf("cg_frame (data/ordered-set block): %0.1f%%",
+                                       cg_frame.get_coverage()), UVM_LOW)
+        endfunction
+    endclass
+
+    // Control-request coverage: request kind, outcome, and PhyStatus completion latency (item 11).
+    class pipe7_ctrl_coverage extends uvm_subscriber #(ctrl_transaction);
+        `uvm_component_utils(pipe7_ctrl_coverage)
+        ctrl_transaction cur;
+        covergroup cg_req;
+            cp_kind: coverpoint cur.kind {
+                bins power = {0}; bins rate = {1}; bins width = {2};
+            }
+            cp_done: coverpoint cur.outcome_done { bins done = {1}; bins not_done = {0}; }
+            // PhyStatus completion latency (PHY-specific bound; item 7 parameterizes the check).
+            cp_latency: coverpoint cur.latency_cycles {
+                bins immediate = {[0:1]};    // rejects complete in ~1 cycle
+                bins short     = {[2:6]};
+                bins long      = {[7:20]};
+                bins over      = {[21:$]};
+            }
+            x_kind_done: cross cp_kind, cp_done;
+        endgroup
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+            cg_req = new();
+        endfunction
+        function void write(ctrl_transaction t);
+            cur = t;
+            cg_req.sample();
+        endfunction
+        function void report_phase(uvm_phase phase);
+            `uvm_info("COV", $sformatf("cg_req (kind/outcome/PhyStatus-latency): %0.1f%%",
+                                       cg_req.get_coverage()), UVM_LOW)
+        endfunction
+    endclass
+
+    // Message-bus opcode coverage (item 11).
+    class pipe7_msgbus_coverage extends uvm_subscriber #(msgbus_transaction);
+        `uvm_component_utils(pipe7_msgbus_coverage)
+        msgbus_transaction cur;
+        bit [1:0]          op;    // 0=read, 1=write_uncommitted, 2=write_committed
+        covergroup cg_op;
+            cp_opcode: coverpoint op {
+                bins rd          = {0};
+                bins wr_uncommit = {1};
+                bins wr_commit   = {2};
+            }
+            cp_is_read: coverpoint cur.is_read { bins rd = {1}; bins wr = {0}; }
+        endgroup
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+            cg_op = new();
+        endfunction
+        function void write(msgbus_transaction t);
+            cur = t;
+            op  = t.write ? (t.committed ? 2'd2 : 2'd1) : 2'd0;
+            cg_op.sample();
+        endfunction
+        function void report_phase(uvm_phase phase);
+            `uvm_info("COV", $sformatf("cg_op (message-bus opcode): %0.1f%%",
+                                       cg_op.get_coverage()), UVM_LOW)
         endfunction
     endclass
 
@@ -299,6 +373,7 @@ package pipe7_mac_pkg;
         bit           outcome_error;
         bit [3:0]     act_pd, act_rate;
         bit [2:0]     act_width, act_rxw;
+        int unsigned  latency_cycles;   // request-accept -> PhyStatus completion (for coverage)
 
         constraint c_kind  { kind inside {0, 1, 2}; }
         constraint c_pd    { pd inside {PD_P0, PD_P0S, PD_P1, PD_P2}; }
@@ -367,6 +442,7 @@ package pipe7_mac_pkg;
                 if (cvif.drv_cb.done === 1'b1)      begin tr.outcome_done  = 1'b1; break; end
                 if (cvif.drv_cb.req_error === 1'b1) begin tr.outcome_error = 1'b1; break; end
             end
+            tr.latency_cycles = wcnt;   // cycles from request to PhyStatus completion / reject
             // Capture the resulting PIPE command state (driven by the FSM).
             tr.act_pd    = mvif.power_down;
             tr.act_rate  = mvif.rate;
@@ -845,6 +921,9 @@ package pipe7_mac_pkg;
         pipe7_msgbus_agent      mbus_agent;     // active (register read/write)
         pipe7_msgbus_responder  mbus_resp;      // PHY-side M2P decode + P2M drive
         pipe7_msgbus_scoreboard mbus_sb;
+        // Coverage closure (item 11)
+        pipe7_ctrl_coverage     req_cov;        // request kind/outcome/PhyStatus-latency
+        pipe7_msgbus_coverage   mbus_cov;       // message-bus opcode
 
         function new(string name, uvm_component parent);
             super.new(name, parent);
@@ -870,6 +949,9 @@ package pipe7_mac_pkg;
             mbus_agent = pipe7_msgbus_agent::type_id::create("mbus_agent", this);
             mbus_resp  = pipe7_msgbus_responder::type_id::create("mbus_resp", this);
             mbus_sb    = pipe7_msgbus_scoreboard::type_id::create("mbus_sb", this);
+
+            req_cov    = pipe7_ctrl_coverage::type_id::create("req_cov", this);
+            mbus_cov   = pipe7_msgbus_coverage::type_id::create("mbus_cov", this);
         endfunction
 
         function void connect_phase(uvm_phase phase);
@@ -883,6 +965,9 @@ package pipe7_mac_pkg;
             // Message bus: master requests + PHY-decoded transactions -> msgbus scoreboard.
             mbus_agent.ap.connect(mbus_sb.req_fifo.analysis_export);
             mbus_resp.ap.connect(mbus_sb.dec_fifo.analysis_export);
+            // Coverage closure: control requests + message-bus transactions.
+            ctrl_agent.ap.connect(req_cov.analysis_export);
+            mbus_agent.ap.connect(mbus_cov.analysis_export);
         endfunction
     endclass
 

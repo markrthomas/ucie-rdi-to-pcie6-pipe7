@@ -82,8 +82,23 @@ wide-data UVM RX stimulus is a documented follow-on — the Gen6 raw path is alr
 Verilator `verilator_gen6` smoke and the PyUVM datapath tier; folding it into this DUT needs the
 Gen5/Gen6 rate-mux + width gearbox (the same integration deferred elsewhere).
 
-## Roadmap (PLAN.md items 11–12)
+## Item 11 — functional-coverage closure (this commit)
 
-- **11** — functional-coverage closure (Rate×Width, PowerDown, framing-mode, msgbus-opcode,
-  PhyStatus-latency covergroups); metrics in the README.
-- **12** — docs + coverage sign-off.
+The env's coverage model (all covergroups report `%` via `get_coverage()` in `report_phase`
+under VCS; the directed `pipe7_full_test` is built to close every bin):
+
+| Covergroup (component) | Coverpoints / crosses | Closed by |
+|------------------------|-----------------------|-----------|
+| `cg_ctrl` (`ctrl_cov`, off the MAC monitor) | `cp_rate` (Gen5/Gen6), `cp_width` (10/20/40/80/160), `cp_pd` (P0/P0s/P1/P2), **`cp_framing_mode`** (Gen5-130b / Gen6-wide), **`x_rate_width`** cross | control ladder + Gen5↔Gen6 |
+| `cg_req` (`req_cov`, off the control agent) | `cp_kind` (power/rate/width), `cp_done`, **`cp_latency`** (PhyStatus completion: immediate/short/long/over), `x_kind_done` | directed control scenario (11 done + 2 reject) |
+| `cg_op` (`mbus_cov`, off the msgbus agent) | **`cp_opcode`** (read / write_uncommitted / write_committed), `cp_is_read` | directed message-bus scenario |
+| `cg_frame` (`frame_cov`, off the recovered RDI) | `cp_is_os` (data / ordered-set block) | random datapath payloads |
+
+This closes the plan's item-11 set: **Rate×Width**, **PowerDown-state**, **framing-mode**,
+**message-bus-opcode**, and **PhyStatus-latency**. Because the tier is authored-not-run here,
+the numeric percentages are produced under VCS; the sampling wiring and bins are review-fixed.
+
+## Roadmap (PLAN.md item 12)
+
+- **12** — docs + coverage sign-off (finalize architecture / verification_plan / uvm docs;
+  record the coverage baseline).
