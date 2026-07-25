@@ -6,7 +6,7 @@
 .PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
-        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_gen6 \
+        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_gen6 verilator_integ \
         verilator_msgbus verilator_nl1 vivado wave waves xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
@@ -54,6 +54,12 @@ ASSN_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_tx_framer.sv src
 ASSN_FILES = $(ASSN_RTL) $(ASSN_MOD) test/pipe7_phy_responder_stub.sv test/tb_pipe7_assertions.sv
 ASSN_TOP = tb_pipe7_assertions
 ASSN_DIR = obj_dir_assn
+# Item 15: integrated TxElecIdle-gated datapath (framer/deframer) + control FSM + PHY responder,
+# with the item-7 assertions bound. Self-clocking smoke via `verilator --binary --timing --assert`.
+INTEG_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv src/pipe7_mac_datapath.sv
+INTEG_FILES = $(INTEG_RTL) test/pipe7_mac_bridge_assertions.sv test/pipe7_phy_responder_stub.sv test/tb_pipe7_integ.sv
+INTEG_TOP = tb_pipe7_integ
+INTEG_DIR = obj_dir_integ
 UVM_MAKE = $(MAKE) -C test/uvm -f Makefile.vcs
 
 # ---- Waveform build (opt-in tracing of any self-clocking TB) ----
@@ -77,6 +83,10 @@ else ifeq ($(WAVE_TB),gen6)
 else ifeq ($(WAVE_TB),assn)
     WAVE_FILES = $(ASSN_FILES)
     WAVE_TOP   = $(ASSN_TOP)
+    WAVE_EXTRA = --assert
+else ifeq ($(WAVE_TB),integ)
+    WAVE_FILES = $(INTEG_FILES)
+    WAVE_TOP   = $(INTEG_TOP)
     WAVE_EXTRA = --assert
 else
     WAVE_FILES = $(FRAMING_FILES)
@@ -102,9 +112,10 @@ help:
 	@echo "  make verilator_framing Gen5 128b/130b TX framer -> RX deframer round-trip"
 	@echo "  make verilator_gen6    Gen6 (Rate=5) raw wide datapath + L0p + PAM4"
 	@echo "  make verilator_assn    PIPE protocol SVA assertions (Verilator --assert)"
+	@echo "  make verilator_integ   integrated EI-gated datapath + control + assertions bound"
 	@echo ""
 	@echo "Waveforms (GTKWave):"
-	@echo "  make waves   [WAVE_TB=framing|ctrl|msgbus|gen6|assn]"
+	@echo "  make waves   [WAVE_TB=framing|ctrl|msgbus|gen6|assn|integ]"
 	@echo "                         build+run the TB with --trace -> waves/<tb>.vcd"
 	@echo "  make gtkwave [WAVE_TB=...]"
 	@echo "                         waves, then open GTKWave with the waves/<tb>.gtkw layout"
@@ -143,7 +154,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_gen6 verilator_assn
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_gen6 verilator_assn verilator_integ
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -232,6 +243,18 @@ verilator_assn:
 	@echo "Running Verilator protocol-assertion smoke..."
 	./$(ASSN_DIR)/assn_sim
 
+# Item 15: integration smoke -- TxElecIdle-gated datapath + control FSM + PHY responder, with
+# the item-7 assertions bound (proves P1 holds with real EI gating). --assert; $fatal on fail.
+verilator_integ:
+	@echo "========== Verilator integration smoke (EI-gated datapath + assertions) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
+	rm -rf $(INTEG_DIR)
+	$(VERILATOR) --binary --timing --assert -Isrc \
+		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(INTEG_TOP) --Mdir $(INTEG_DIR) -o integ_sim $(INTEG_FILES)
+	@echo "Running Verilator integration smoke..."
+	./$(INTEG_DIR)/integ_sim
+
 # Verilator with coverage: separate build dir so normal obj_dir stays unchanged.
 verilator_cov:
 	@echo "========== Verilator with coverage =========="
@@ -319,6 +342,7 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_tx_framer src/pipe7_pkg.sv src/pipe7_tx_framer.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_rx_deframer src/pipe7_pkg.sv src/pipe7_rx_deframer.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_gen6_datapath src/pipe7_pkg.sv src/pipe7_gen6_datapath.sv
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_datapath src/pipe7_pkg.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv src/pipe7_mac_datapath.sv
 	$(VERILATOR) --lint-only -Wall --assert -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_bridge_assertions src/pipe7_pkg.sv $(ASSN_MOD)
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_dut src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv src/pipe7_msgbus_master.sv src/pipe7_regfile.sv test/uvm/pipe7_mac_dut.sv
 
@@ -401,7 +425,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(GEN6_DIR) $(ASSN_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
 	rm -f coverage.info
 	rm -f waves/*.vcd
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb

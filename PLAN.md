@@ -368,6 +368,20 @@ generated VCDs are git-ignored; the `.gtkw` files are tracked.
     CI job from advisory to a required gate once green. *Ordering:* after items 3–4 (control
     FSM + msgbus) and item 13.
 
+### Post-plan follow-ons (integration hardening)
+
+Items 0–14 build the cores and the three DV tiers as (largely) standalone, spec-accurate
+pieces. These follow-ons integrate them and close the gaps flagged along the way:
+
+15. **TxElecIdle-gated datapath integration (delivered).** `src/pipe7_mac_datapath.sv` composes
+    the Gen5 framer/deframer with a **data-phase FSM that owns `TxElecIdle`** — asserted (idle)
+    except while transmitting, and a data phase may start only in P0 — so `TxDataValid` is never
+    high while `TxElecIdle` is asserted. `test/tb_pipe7_integ.sv` composes it with the control
+    FSM + PHY responder, **binds the item-7 assertions**, and proves P1 holds *non-vacuously*
+    (plus a P2 negative: no data phase outside P0). `make verilator_integ`, wired into `regress`.
+- **Open:** the Gen5-at-160 two-blocks-per-`pclk` gearbox; Gen6-wide UVM RX stimulus; folding
+    `pipe7_mac_datapath` + the Gen5/Gen6 rate-mux into the `ucie_rdi_to_pipe7_mac_bridge` top.
+
 ---
 
 ## Verification (how to prove it end-to-end)

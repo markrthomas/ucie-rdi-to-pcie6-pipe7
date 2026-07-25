@@ -24,6 +24,7 @@ crosses RDI↔PCLK with pointer-only synchronization (no combinational data path
 | `pipe7_cdc_elastic_buf` | Dual-clock Gray-pointer elastic buffer (RDI↔PCLK). |
 | `pipe7_mac_ctrl_fsm` | PowerDown/Rate/Width sequencer, gated on `PhyStatus`; Rate/Width legal only in P0/P1 (§8.4.1). PCLK-as-PHY-input adds the `PclkChangeOk`→`PclkChangeAck` handshake. |
 | `pipe7_tx_framer` / `pipe7_rx_deframer` | **MAC-owned** Gen5 128b/130b block coding: the 2-bit sync header is embedded in TxData/RxData (no discrete sync-header/start-block pins in SerDes). The deframer recovers block alignment (sync-header hunt + bit-slip). |
+| `pipe7_mac_datapath` | Gen5 datapath (framer + deframer) with a **data-phase FSM that owns `TxElecIdle`**: asserted (idle) except while transmitting, so `TxDataValid` is never high while `TxElecIdle` is asserted (assertion P1). A data phase starts only in P0 and ends after the framer drains. |
 | `pipe7_gen6_datapath` | Gen6 (Rate=5) raw wide datapath: no 128b/130b sync header (1b/1b at the PIPE datapath); carries the `PAM4RestrictedLevels` config. Flit/FEC/LCRC are controller-side. |
 | `pipe7_msgbus_master` + `pipe7_regfile` | 8-bit M2P/P2M message-bus master (read = 2 cyc, write = 3 cyc; read_completion / write_ack) + MAC-side register file. |
 | `ucie_rdi_to_pipe7_mac_bridge` | Top; per-lane generate (item-1 datapath skeleton; core integration is progressive). |
