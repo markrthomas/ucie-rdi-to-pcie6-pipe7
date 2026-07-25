@@ -2,14 +2,14 @@
 `timescale 1ns/1ps
 
 /**
- * uvm_test_top -- UVM harness for the PIPE 7.1 MAC bridge datapath env (closure-plan item 8).
- * Instantiates the RDI + PIPE-MAC interfaces, the datapath DUT (framer/deframer), and a PHY
- * BFM that loops TxData back to RxData so the RDI-payload round-trip closes. VCS/UVM 1.2,
- * authored-and-review-validated (not run in the OSS environment).
+ * uvm_test_top -- UVM harness for the PIPE 7.1 MAC bridge env (closure-plan items 8-9).
+ * Instantiates the RDI + control + PIPE-MAC interfaces, the datapath+control DUT, a PHY BFM
+ * that loops TxData back to RxData (datapath round-trip), and drives PhyStatus from the UVM
+ * PHY-responder agent (control-plane handshake). VCS/UVM 1.2, authored-and-review-validated.
  *
- * Item 8 drives static Gen5 command values on the PIPE MAC interface; the control-plane
- * PHY-responder agent that answers PowerDown/Rate/Width and drives PhyStatus is item 9, and
- * the Gen6/message-bus paths are item 10.
+ * The FSM now drives the PIPE command signals (PowerDown/Rate/Width/...) and the PHY-responder
+ * agent drives the PHY status signals, so only the truly-static straps are tied off here.
+ * Default test is pipe7_full_test; override with +UVM_TESTNAME.
  */
 module uvm_test_top;
 
@@ -35,52 +35,51 @@ module uvm_test_top;
     // --- Interfaces ---
     ucie_rdi_if  #(.PAYLOAD_WIDTH(BLOCK_PAYLOAD)) rdi_tx_if (.clk(clk), .rst_n(rst_n));
     ucie_rdi_if  #(.PAYLOAD_WIDTH(BLOCK_PAYLOAD)) rdi_rx_if (.clk(clk), .rst_n(rst_n));
+    pipe7_ctrl_if                                 ctrl_if   (.clk(clk), .rst_n(rst_n));
     pipe7_mac_if #(.TX_DATA_WIDTH(PIPE_WIDTH), .RX_DATA_WIDTH(PIPE_WIDTH))
                  mac_if (.pclk(clk), .rx_clk(rx_clk));
 
-    // --- Static MAC command values (Gen5 data phase). Control plane = item 9. ---
+    // --- Static straps (not driven by the FSM or the PHY responder) ---
     assign mac_if.reset_n                = rst_n;
-    assign mac_if.power_down             = PD_P0;
-    assign mac_if.rate                   = RATE_GEN5;
-    assign mac_if.width                  = W_80;
-    assign mac_if.rx_width               = W_80;
-    assign mac_if.tx_elec_idle           = 4'h0;      // deasserted: data phase
     assign mac_if.tx_detect_rx_loopback  = 1'b0;
     assign mac_if.serdes_arch            = 1'b1;      // SerDes architecture strap
-    assign mac_if.rx_standby             = 1'b0;
     assign mac_if.sris_enable            = 1'b0;
-    assign mac_if.pclk_change_ack        = 1'b0;
     assign mac_if.async_power_change_ack = 1'b0;
     assign mac_if.tx_commonmode_disable  = 1'b0;
     assign mac_if.rx_ei_detect_disable   = 1'b0;
     assign mac_if.deep_pm_req_n          = 1'b1;
     assign mac_if.restore_n              = 1'b1;
+    assign mac_if.m2p_message_bus        = '0;       // message-bus master = item 10
 
-    // --- DUT: RDI payload <-> PIPE MAC datapath (framer/deframer) ---
+    // --- DUT: control FSM + Gen5 datapath ---
     pipe7_mac_dut #(.PIPE_WIDTH(PIPE_WIDTH)) dut (
         .clk(clk), .reset_n(rst_n),
+        // control request (from ctrl_if / UVM control agent)
+        .req_valid(ctrl_if.req_valid), .req_kind(ctrl_if.req_kind),
+        .req_power_down(ctrl_if.req_power_down), .req_rate(ctrl_if.req_rate),
+        .req_width(ctrl_if.req_width), .req_rxwidth(ctrl_if.req_rxwidth),
+        .busy(ctrl_if.busy), .done(ctrl_if.done), .req_error(ctrl_if.req_error),
+        // PIPE MAC command outputs (FSM -> interface)
+        .power_down(mac_if.power_down), .rate(mac_if.rate), .width(mac_if.width),
+        .rx_width(mac_if.rx_width), .tx_elec_idle(mac_if.tx_elec_idle),
+        .rx_standby(mac_if.rx_standby), .pclk_change_ack(mac_if.pclk_change_ack),
+        // PIPE MAC status inputs (PHY responder -> FSM)
+        .phy_status(mac_if.phy_status), .pclk_change_ok(mac_if.pclk_change_ok),
+        // RDI datapath
         .rdi_tx_valid(rdi_tx_if.valid), .rdi_tx_data(rdi_tx_if.data),
         .rdi_tx_is_os(rdi_tx_if.is_os), .rdi_tx_ready(rdi_tx_if.ready),
         .rdi_rx_valid(rdi_rx_if.valid), .rdi_rx_data(rdi_rx_if.data),
         .rdi_rx_is_os(rdi_rx_if.is_os),
+        // PIPE MAC Tx/Rx datapath
         .tx_data(mac_if.tx_data), .tx_data_valid(mac_if.tx_data_valid),
         .rx_data(mac_if.rx_data), .rx_valid(mac_if.rx_valid),
         .block_locked(), .sync_error()
     );
     assign rdi_rx_if.ready = 1'b1;    // RX sink always ready (deframer has no backpressure)
 
-    // --- PHY BFM: loopback TxData -> RxData (same clock/width) so the round-trip closes ---
-    assign mac_if.rx_data           = mac_if.tx_data;
-    assign mac_if.rx_valid          = mac_if.tx_data_valid;
-    // PHY-driven status defaults (spec-timed responder = item 9).
-    assign mac_if.phy_status        = 1'b0;
-    assign mac_if.rx_status         = 3'b000;
-    assign mac_if.rx_elec_idle      = 1'b0;
-    assign mac_if.rx_standby_status = 1'b0;
-    assign mac_if.pclk_change_ok    = 1'b0;
-    assign mac_if.refclk_required_n = 1'b1;
-    assign mac_if.deep_pm_ack_n     = 1'b1;
-    assign mac_if.p2m_message_bus   = '0;
+    // --- PHY BFM: loopback TxData -> RxData (data). PhyStatus + status come from phy_agent. ---
+    assign mac_if.rx_data  = mac_if.tx_data;
+    assign mac_if.rx_valid = mac_if.tx_data_valid;
 
     // --- UVM config + run ---
     initial begin
@@ -88,7 +87,10 @@ module uvm_test_top;
         uvm_config_db#(virtual ucie_rdi_if)::set(null, "*rdi_tx_agent.mon", "vif",        rdi_tx_if);
         uvm_config_db#(virtual ucie_rdi_if)::set(null, "*rdi_rx_mon",       "vif",        rdi_rx_if);
         uvm_config_db#(virtual pipe7_mac_if)::set(null, "*mac_mon",         "mac_vif",    mac_if);
-        run_test("pipe7_mac_sanity_test");
+        uvm_config_db#(virtual pipe7_ctrl_if)::set(null, "*ctrl_agent.drv", "ctrl_vif",   ctrl_if);
+        uvm_config_db#(virtual pipe7_mac_if)::set(null, "*ctrl_agent.drv",  "mac_vif",    mac_if);
+        uvm_config_db#(virtual pipe7_mac_if)::set(null, "*phy_agent",       "mac_vif",    mac_if);
+        run_test("pipe7_full_test");
     end
 
 endmodule

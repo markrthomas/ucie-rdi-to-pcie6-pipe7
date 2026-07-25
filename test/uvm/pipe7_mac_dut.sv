@@ -2,17 +2,19 @@
 `timescale 1ns/1ps
 
 /**
- * pipe7_mac_dut -- datapath DUT for the PIPE 7.1 MAC UVM base env (closure-plan item 8).
+ * pipe7_mac_dut -- datapath + control-plane DUT for the PIPE 7.1 MAC UVM env
+ * (closure-plan items 8-9).
  *
- * Composes the MAC-owned Gen5 128b/130b datapath (pipe7_tx_framer -> pipe7_rx_deframer) into a
- * single bridge-datapath block: RDI payload in -> framed PIPE TxData; PIPE RxData -> recovered
- * RDI payload out. The UVM top loops TxData back to RxData through a PHY BFM so the round-trip
- * closes and the scoreboard can check RDI-payload in == RDI-payload out.
+ * Composes the MAC-owned cores into a single bridge block:
+ *   - control plane: pipe7_mac_ctrl_fsm sequences PowerDown/Rate/Width toward the PHY, gated
+ *     on PhyStatus (item 9). Its request interface is exposed as DUT ports for the UVM control
+ *     agent; its command outputs drive the PIPE MAC command signals.
+ *   - datapath: pipe7_tx_framer -> pipe7_rx_deframer (Gen5 128b/130b, item 8). RDI payload in
+ *     -> framed TxData; RxData -> recovered RDI payload out.
  *
- * Scope note: this is the DATAPATH env (item 8). The control-plane FSM + PHY-responder
- * handshake are wired in item 9, and the Gen6 raw path / message bus in item 10; the top drives
- * static Gen5 command values on pipe7_mac_if for now. TX_DATA_WIDTH is a Gen5 SerDes width
- * <= 130 (single-block-per-cycle framer), default 80.
+ * The UVM top loops TxData back to RxData through a PHY BFM and drives PhyStatus from the
+ * PHY-responder agent, so both the datapath round-trip and the control-plane handshake close.
+ * TX_DATA_WIDTH is a Gen5 SerDes width <= 130 (single-block-per-cycle framer), default 80.
  */
 module pipe7_mac_dut
     import pipe7_pkg::*;
@@ -22,30 +24,65 @@ module pipe7_mac_dut
     input  logic                     clk,
     input  logic                     reset_n,
 
-    // RDI payload in (TX source)
+    // ---- Control request (controller -> FSM) ----
+    input  logic                     req_valid,
+    input  logic [1:0]               req_kind,
+    input  logic [3:0]               req_power_down,
+    input  logic [3:0]               req_rate,
+    input  logic [2:0]               req_width,
+    input  logic [2:0]               req_rxwidth,
+    output logic                     busy,
+    output logic                     done,
+    output logic                     req_error,
+
+    // ---- PIPE MAC command outputs (FSM -> PHY) ----
+    output logic [3:0]               power_down,
+    output logic [3:0]               rate,
+    output logic [2:0]               width,
+    output logic [2:0]               rx_width,
+    output logic [3:0]               tx_elec_idle,
+    output logic                     rx_standby,
+    output logic                     pclk_change_ack,
+
+    // ---- PIPE MAC status inputs (PHY -> FSM) ----
+    input  logic                     phy_status,
+    input  logic                     pclk_change_ok,
+
+    // ---- RDI payload in (TX source) ----
     input  logic                     rdi_tx_valid,
     input  logic [BLOCK_PAYLOAD-1:0] rdi_tx_data,
     input  logic                     rdi_tx_is_os,
     output logic                     rdi_tx_ready,
 
-    // RDI payload out (RX sink)
+    // ---- RDI payload out (RX sink) ----
     output logic                     rdi_rx_valid,
     output logic [BLOCK_PAYLOAD-1:0] rdi_rx_data,
     output logic                     rdi_rx_is_os,
 
-    // PIPE MAC Tx (to PHY)
+    // ---- PIPE MAC Tx datapath (to PHY) ----
     output logic [PIPE_WIDTH-1:0]    tx_data,
     output logic                     tx_data_valid,
 
-    // PIPE MAC Rx (from PHY)
+    // ---- PIPE MAC Rx datapath (from PHY) ----
     input  logic [PIPE_WIDTH-1:0]    rx_data,
     input  logic                     rx_valid,
 
-    // Datapath status (observed by the scoreboard/coverage)
+    // ---- Datapath status ----
     output logic                     block_locked,
     output logic                     sync_error
 );
 
+    // Control plane: PowerDown/Rate/Width sequencer gated on PhyStatus.
+    pipe7_mac_ctrl_fsm #(.PCLK_IS_PHY_INPUT(1'b0)) fsm (
+        .pclk(clk), .reset_n,
+        .req_valid, .req_kind(ctrl_req_e'(req_kind)),
+        .req_power_down, .req_rate, .req_width, .req_rxwidth,
+        .busy, .done, .req_error,
+        .power_down, .rate, .width, .rx_width, .tx_elec_idle, .rx_standby, .pclk_change_ack,
+        .phy_status, .pclk_change_ok
+    );
+
+    // Datapath: Gen5 128b/130b framer -> deframer.
     pipe7_tx_framer #(.PIPE_WIDTH(PIPE_WIDTH)) framer (
         .clk, .reset_n,
         .pl_valid(rdi_tx_valid), .pl_data(rdi_tx_data), .pl_is_os(rdi_tx_is_os),

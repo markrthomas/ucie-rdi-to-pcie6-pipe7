@@ -31,10 +31,30 @@ leak. Coverage samples the framing mode (data vs ordered-set) and the `Rate × W
 deframer) is elaborated by the repo-root `make lint`, so the structural core of this env is
 gate-validated even though the UVM classes are review-only.
 
-## Roadmap (PLAN.md items 9–12)
+## Item 9 — control plane (this commit)
 
-- **9** — PHY-responder agent (spec-timed `PhyStatus`/`RxStatus`/`P2M` BFM answering
-  PowerDown/Rate/Width) + control-plane scoreboard checker; wire the item-3 control FSM in.
+Wires the item-3 control FSM into the DUT and adds the control-plane env:
+
+```
+pipe7_ctrl_if.sv          controller request/status interface (req/busy/done/req_error)
+pipe7_mac_dut.sv          now also instantiates pipe7_mac_ctrl_fsm (command outputs -> mac_if)
+pipe7_mac_pkg.sv (added)  ctrl_transaction; pipe7_ctrl_agent (active request driver, captures
+                          outcome + PIPE command state); pipe7_phy_agent (PHY-responder BFM:
+                          watches PowerDown/Rate/Width and drives PhyStatus after a latency,
+                          via the interface's new phy_cb); pipe7_ctrl_scoreboard (independent
+                          legality model -- Rate/Width legal only in P0/P1 -- checks each
+                          request's outcome and resulting command state)
+seq_lib/pipe7_seq_lib.sv  pipe7_ctrl_directed_seq (power ladder + Gen5<->Gen6 + Width + two
+                          illegal rate changes) and tests: pipe7_ctrl_test, pipe7_full_test
+```
+
+**What it checks:** the PHY-responder agent answers every PowerDown/Rate/Width change with a
+spec-timed `PhyStatus`; the legality scoreboard confirms each request reaches the right outcome
+(11 completions + 2 rejections in the directed scenario) and the command state matches the
+model. `pipe7_full_test` runs the datapath round-trip and the control scenario concurrently.
+
+## Roadmap (PLAN.md items 10–12)
+
 - **10** — RX Gen5 130b + Gen6 wide-data stimulus, mirrored RX queues, message-bus transaction
   scoreboard (item-4 master + regfile).
 - **11** — functional-coverage closure (Rate×Width, PowerDown, framing-mode, msgbus-opcode,

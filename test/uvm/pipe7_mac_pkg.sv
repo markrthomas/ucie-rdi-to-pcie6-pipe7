@@ -285,17 +285,277 @@ package pipe7_mac_pkg;
     endclass
 
     // ==================================================================
+    // Control plane (item 9): request transaction, active control agent,
+    // PHY-responder BFM, and a legality scoreboard.
+    // ==================================================================
+    class ctrl_transaction extends uvm_sequence_item;
+        rand bit [1:0] kind;    // 0=REQ_POWER, 1=REQ_RATE, 2=REQ_WIDTH
+        rand bit [3:0] pd;
+        rand bit [3:0] rate;
+        rand bit [2:0] width;
+        rand bit [2:0] rxw;
+        // Captured by the driver after the request completes:
+        bit           outcome_done;
+        bit           outcome_error;
+        bit [3:0]     act_pd, act_rate;
+        bit [2:0]     act_width, act_rxw;
+
+        constraint c_kind  { kind inside {0, 1, 2}; }
+        constraint c_pd    { pd inside {PD_P0, PD_P0S, PD_P1, PD_P2}; }
+        constraint c_rate  { rate inside {RATE_GEN5, RATE_GEN6}; }
+        constraint c_width { width inside {W_80, W_160}; rxw inside {W_80, W_160}; }
+
+        `uvm_object_utils_begin(ctrl_transaction)
+            `uvm_field_int(kind,  UVM_ALL_ON)
+            `uvm_field_int(pd,    UVM_ALL_ON)
+            `uvm_field_int(rate,  UVM_ALL_ON)
+            `uvm_field_int(width, UVM_ALL_ON)
+            `uvm_field_int(rxw,   UVM_ALL_ON)
+        `uvm_object_utils_end
+
+        function new(string name = "ctrl_transaction");
+            super.new(name);
+        endfunction
+    endclass
+
+    class ctrl_driver extends uvm_driver #(ctrl_transaction);
+        `uvm_component_utils(ctrl_driver)
+        virtual pipe7_ctrl_if cvif;
+        virtual pipe7_mac_if  mvif;
+        uvm_analysis_port #(ctrl_transaction) ap;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+            ap = new("ap", this);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db#(virtual pipe7_ctrl_if)::get(this, "", "ctrl_vif", cvif))
+                `uvm_fatal("NOVIF", "ctrl_vif not set for ctrl_driver")
+            if (!uvm_config_db#(virtual pipe7_mac_if)::get(this, "", "mac_vif", mvif))
+                `uvm_fatal("NOVIF", "mac_vif not set for ctrl_driver")
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            @(cvif.drv_cb);
+            cvif.drv_cb.req_valid <= 1'b0;
+            forever begin
+                ctrl_transaction tr;
+                seq_item_port.get_next_item(tr);
+                drive(tr);
+                ap.write(tr);
+                seq_item_port.item_done();
+            end
+        endtask
+
+        task drive(ctrl_transaction tr);
+            int wcnt;
+            @(cvif.drv_cb);
+            cvif.drv_cb.req_kind       <= tr.kind;
+            cvif.drv_cb.req_power_down <= tr.pd;
+            cvif.drv_cb.req_rate       <= tr.rate;
+            cvif.drv_cb.req_width      <= tr.width;
+            cvif.drv_cb.req_rxwidth    <= tr.rxw;
+            cvif.drv_cb.req_valid      <= 1'b1;
+            @(cvif.drv_cb);
+            cvif.drv_cb.req_valid      <= 1'b0;
+            tr.outcome_done  = 1'b0;
+            tr.outcome_error = 1'b0;
+            for (wcnt = 0; wcnt < 200; wcnt++) begin
+                @(cvif.drv_cb);
+                if (cvif.drv_cb.done === 1'b1)      begin tr.outcome_done  = 1'b1; break; end
+                if (cvif.drv_cb.req_error === 1'b1) begin tr.outcome_error = 1'b1; break; end
+            end
+            // Capture the resulting PIPE command state (driven by the FSM).
+            tr.act_pd    = mvif.power_down;
+            tr.act_rate  = mvif.rate;
+            tr.act_width = mvif.width;
+            tr.act_rxw   = mvif.rx_width;
+        endtask
+    endclass
+
+    class pipe7_ctrl_agent extends uvm_agent;
+        `uvm_component_utils(pipe7_ctrl_agent)
+        ctrl_driver                            drv;
+        uvm_sequencer #(ctrl_transaction)      seqr;
+        uvm_analysis_port #(ctrl_transaction)  ap;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            drv  = ctrl_driver::type_id::create("drv", this);
+            seqr = uvm_sequencer#(ctrl_transaction)::type_id::create("seqr", this);
+        endfunction
+
+        function void connect_phase(uvm_phase phase);
+            ap = drv.ap;
+            drv.seq_item_port.connect(seqr.seq_item_export);
+        endfunction
+    endclass
+
+    // Independently-timed PHY responder: answers each PowerDown/Rate/Width change with a
+    // single-cycle PhyStatus after `latency` cycles (mirrors pipe7_phy_responder_stub).
+    class pipe7_phy_agent extends uvm_component;
+        `uvm_component_utils(pipe7_phy_agent)
+        virtual pipe7_mac_if vif;
+        int unsigned latency = 4;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db#(virtual pipe7_mac_if)::get(this, "", "mac_vif", vif))
+                `uvm_fatal("NOVIF", "mac_vif not set for pipe7_phy_agent")
+            void'(uvm_config_db#(int unsigned)::get(this, "", "latency", latency));
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            bit [3:0] prev_pd, prev_rate, cur_pd, cur_rate;
+            bit [2:0] prev_w, prev_rxw, cur_w, cur_rxw;
+            bit       servicing;
+            int       cnt;
+            // Default the PHY-driven status/response signals.
+            @(vif.phy_cb);
+            vif.phy_cb.phy_status        <= 1'b0;
+            vif.phy_cb.rx_status         <= 3'b000;
+            vif.phy_cb.rx_elec_idle      <= 1'b0;
+            vif.phy_cb.rx_standby_status <= 1'b0;
+            vif.phy_cb.pclk_change_ok    <= 1'b0;
+            vif.phy_cb.refclk_required_n <= 1'b1;
+            vif.phy_cb.deep_pm_ack_n     <= 1'b1;
+            vif.phy_cb.p2m_message_bus   <= '0;
+            prev_pd = vif.phy_cb.power_down; prev_rate = vif.phy_cb.rate;
+            prev_w  = vif.phy_cb.width;      prev_rxw  = vif.phy_cb.rx_width;
+            servicing = 1'b0; cnt = 0;
+            forever begin
+                @(vif.phy_cb);
+                vif.phy_cb.phy_status <= 1'b0;      // default-low; pulse for one cycle
+                if (vif.phy_cb.reset_n !== 1'b1) begin
+                    prev_pd = vif.phy_cb.power_down; prev_rate = vif.phy_cb.rate;
+                    prev_w  = vif.phy_cb.width;      prev_rxw  = vif.phy_cb.rx_width;
+                    servicing = 1'b0;
+                    continue;
+                end
+                cur_pd = vif.phy_cb.power_down; cur_rate = vif.phy_cb.rate;
+                cur_w  = vif.phy_cb.width;      cur_rxw  = vif.phy_cb.rx_width;
+                if (!servicing) begin
+                    if (cur_pd !== prev_pd || cur_rate !== prev_rate ||
+                        cur_w  !== prev_w  || cur_rxw  !== prev_rxw) begin
+                        prev_pd = cur_pd; prev_rate = cur_rate; prev_w = cur_w; prev_rxw = cur_rxw;
+                        servicing = 1'b1; cnt = latency;
+                    end
+                end else begin
+                    if (cnt > 1) cnt--;
+                    else begin
+                        vif.phy_cb.phy_status <= 1'b1;
+                        servicing = 1'b0;
+                    end
+                end
+            end
+        endtask
+    endclass
+
+    // Control-plane legality scoreboard: replays an independent model and checks each request's
+    // outcome (done vs req_error) and resulting command state (PIPE 7.1 Sec 8.4.1: a Rate/Width
+    // change is legal only in PowerDown P0/P1).
+    class pipe7_ctrl_scoreboard extends uvm_scoreboard;
+        `uvm_component_utils(pipe7_ctrl_scoreboard)
+        uvm_tlm_analysis_fifo #(ctrl_transaction) fifo;
+        // Model state (mirrors the FSM reset defaults).
+        bit [3:0] m_pd   = PD_P0;
+        bit [3:0] m_rate = RATE_GEN5;
+        bit [2:0] m_w    = W_160;
+        bit [2:0] m_rxw  = W_160;
+        int unsigned n_done, n_reject, n_err;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            fifo = new("fifo", this);
+        endfunction
+
+        function bit rw_legal();
+            return (m_pd == PD_P0) || (m_pd == PD_P1);
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            ctrl_transaction tr;
+            forever begin
+                fifo.get(tr);
+                check(tr);
+            end
+        endtask
+
+        function void check(ctrl_transaction tr);
+            bit exp_done, exp_reject;
+            exp_done = 1'b0; exp_reject = 1'b0;
+            case (tr.kind)
+                2'd0: begin  // REQ_POWER
+                    m_pd = tr.pd; exp_done = 1'b1;
+                end
+                2'd1: begin  // REQ_RATE
+                    if (rw_legal()) begin m_rate = tr.rate; exp_done = 1'b1; end
+                    else exp_reject = 1'b1;
+                end
+                2'd2: begin  // REQ_WIDTH
+                    if (rw_legal()) begin m_w = tr.width; m_rxw = tr.rxw; exp_done = 1'b1; end
+                    else exp_reject = 1'b1;
+                end
+                default: exp_reject = 1'b1;
+            endcase
+
+            if (exp_done) begin
+                if (!tr.outcome_done)
+                    `uvm_error("CTRL_SB", $sformatf("kind=%0d expected done, got done=%0b err=%0b",
+                                                    tr.kind, tr.outcome_done, tr.outcome_error))
+                else begin
+                    n_done++;
+                    if (tr.act_pd !== m_pd || tr.act_rate !== m_rate ||
+                        tr.act_width !== m_w || tr.act_rxw !== m_rxw)
+                        `uvm_error("CTRL_SB", $sformatf(
+                            "command-state mismatch kind=%0d: act(pd=%0d rate=%0d w=%0d rxw=%0d) exp(pd=%0d rate=%0d w=%0d rxw=%0d)",
+                            tr.kind, tr.act_pd, tr.act_rate, tr.act_width, tr.act_rxw,
+                            m_pd, m_rate, m_w, m_rxw))
+                end
+            end else begin
+                if (!tr.outcome_error)
+                    `uvm_error("CTRL_SB", $sformatf("kind=%0d expected reject, got done=%0b err=%0b",
+                                                    tr.kind, tr.outcome_done, tr.outcome_error))
+                else n_reject++;
+            end
+        endfunction
+
+        function void report_phase(uvm_phase phase);
+            `uvm_info("CTRL_SB", $sformatf("control-plane: done=%0d reject=%0d", n_done, n_reject),
+                      UVM_LOW)
+        endfunction
+    endclass
+
+    // ==================================================================
     // Environment
     // ==================================================================
     class pipe7_mac_env extends uvm_env;
         `uvm_component_utils(pipe7_mac_env)
 
-        rdi_agent               rdi_tx_agent;   // active
+        rdi_agent               rdi_tx_agent;   // active (datapath)
         rdi_monitor             rdi_rx_mon;     // passive (recovered payloads)
         pipe7_mac_monitor       mac_mon;
         pipe7_mac_scoreboard    sb;
         pipe7_mac_coverage      ctrl_cov;
         pipe7_framing_coverage  frame_cov;
+        // Control plane (item 9)
+        pipe7_ctrl_agent        ctrl_agent;     // active (PowerDown/Rate/Width requests)
+        pipe7_phy_agent         phy_agent;      // PHY-responder BFM (drives PhyStatus)
+        pipe7_ctrl_scoreboard   ctrl_sb;
 
         function new(string name, uvm_component parent);
             super.new(name, parent);
@@ -313,14 +573,20 @@ package pipe7_mac_pkg;
             sb        = pipe7_mac_scoreboard::type_id::create("sb", this);
             ctrl_cov  = pipe7_mac_coverage::type_id::create("ctrl_cov", this);
             frame_cov = pipe7_framing_coverage::type_id::create("frame_cov", this);
+
+            ctrl_agent = pipe7_ctrl_agent::type_id::create("ctrl_agent", this);
+            phy_agent  = pipe7_phy_agent::type_id::create("phy_agent", this);
+            ctrl_sb    = pipe7_ctrl_scoreboard::type_id::create("ctrl_sb", this);
         endfunction
 
         function void connect_phase(uvm_phase phase);
-            // TX driven payloads -> expected; RX recovered payloads -> actual.
+            // Datapath: TX driven payloads -> expected; RX recovered payloads -> actual.
             rdi_tx_agent.ap.connect(sb.exp_fifo.analysis_export);
             rdi_rx_mon.ap.connect(sb.act_fifo.analysis_export);
             rdi_rx_mon.ap.connect(frame_cov.analysis_export);
             mac_mon.ap.connect(ctrl_cov.analysis_export);
+            // Control plane: each completed request -> legality scoreboard.
+            ctrl_agent.ap.connect(ctrl_sb.fifo.analysis_export);
         endfunction
     endclass
 
