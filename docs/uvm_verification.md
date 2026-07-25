@@ -1,148 +1,86 @@
 # UVM verification guide
 
-This guide describes the UVM environment in `test/uvm/` as it exists in this repository. It is intended to help verification owners extend the environment without confusing it with the Verilator smoke testbench, which remains the current release gate.
+Describes the Tier-2 UVM environment in `test/uvm/` for the UCIe RDI ↔ PIPE 7.1 MAC-facing
+bridge (Gen5 + Gen6). **Authored-and-review-validated:** there is no VCS in the open-source
+environment, so the UVM classes are not run here — the Verilator smoke (`make regress`) is the
+release gate and the PyUVM-on-Cocotb tier (`make cocotb`) is the runnable cross-check. The DUT
+wiring is Verilator-lint-clean (built by `make lint`), so the structural core of the env is
+gate-validated even though the UVM classes are review-only.
 
-## Current scope
+Run under VCS: `make -C test/uvm -f Makefile.vcs` (or `make uvm` at the repo root).
 
-| Area | Current UVM status | Notes |
-|------|--------------------|-------|
-| Simulator target | Synopsys VCS | Driven by `test/uvm/Makefile.vcs` with `-ntb_opts uvm-1.2`. |
-| DUT parameters | 4 lanes, 16-bit RDI, 32-bit PIPE, FIFO depth 16 | Lane/data geometry is centralized as parameters in `ucie_rdi_pcie_pkg` (`NUM_LANES`, `RDI_DATA_WIDTH`, `PIPE_DATA_WIDTH`, derived `RDI_BUS_WIDTH`/`PIPE_BUS_WIDTH`). Transaction widths, scoreboard loops/slices, and coverage sample ports derive from these, and `uvm_test_top` passes the same values into the interfaces and DUT. Fixed stimulus vectors in `seq_lib` and covergroup bins remain 4-lane specific. |
-| TX path (`RDI -> PIPE`) | Stimulated and scoreboarding enabled | Active RDI agent drives requests; passive PIPE monitor observes accepted beats. |
-| RX path (`PIPE -> RDI`) | Wired with passive monitors and a smoke RX driver, with basic checking | `uvm_test_top` instantiates RX interfaces, binds passive RX monitors, and the sanity test now runs a small PIPE RX sequence through `pipe_rx_agent`. |
-| CRC | Enabled for the smoke sequence | `uvm_test_top` now toggles `crc_enable` for a lane-0 CRC smoke run and mirrors the residue check. |
-| Backpressure | PIPE TX ready is agent-controlled in the sanity test | The backpressure sequence drives `ready` low/high/low/high with longer stalls. A deep backpressure sequence paired with an all-lane FIFO-fill now drives **every** lane's TX FIFO to full (`rdi_flow_ctrl` on all lanes) and holds the driver under stall, then releases so the scoreboard proves in-order lossless drain. |
-| Assertions | Compiled and active in the UVM top | CDC monitor/statistics now run in both the UVM flow and the non-UVM regression. |
+## Scope
 
-## UVM block diagram
+| Area | Status |
+|------|--------|
+| Simulator target | Synopsys VCS, `-ntb_opts uvm-1.2` (`test/uvm/Makefile.vcs`). |
+| DUT | `pipe7_mac_dut` composes the real cores: `pipe7_mac_ctrl_fsm` (control), `pipe7_tx_framer`/`pipe7_rx_deframer` (Gen5 128b/130b datapath), `pipe7_msgbus_master` + `pipe7_regfile` (message bus). PIPE width 80 (Gen5 single-block-per-cycle framer). |
+| Interfaces | `pipe7_mac_if` (the real PIPE 7.1 MAC signal set, item 2), `ucie_rdi_if` (128b block payload), `pipe7_ctrl_if` (control requests), `pipe7_msgbus_if` (register requests). |
+| Control plane | Active `pipe7_ctrl_agent` drives PowerDown/Rate/Width; `pipe7_phy_agent` answers with spec-timed `PhyStatus`; `pipe7_ctrl_scoreboard` checks outcome + command state vs an independent legality model. |
+| Datapath (RX) | Active `rdi_agent` drives payloads; the PHY BFM sources `RxData` (loopback of the framed stream); the round-trip scoreboard is the mirrored-queue RX check. |
+| Message bus | Active `pipe7_msgbus_agent` drives reads/writes; `pipe7_msgbus_responder` independently decodes M2P and drives P2M; `pipe7_msgbus_scoreboard` checks framing + register round-trip. |
+| Coverage | Rate×Width, PowerDown-state, framing-mode, message-bus-opcode, PhyStatus-latency covergroups (see below). |
 
-```mermaid
-flowchart LR
-    subgraph TOP[uvm_test_top]
-        RDI_IF[ucie_rdi_if\nTX virtual interface]
-        PIPE_IF[pcie_pipe_if\nTX virtual interface]
-        RX_RDI_IF[ucie_rdi_if\nRX monitor path]
-        RX_PIPE_IF[pcie_pipe_if\nRX smoke path]
-        DUT[ucie_rdi_to_pcie_pipe_bridge]
-    end
+## Components (`test/uvm/pipe7_mac_pkg.sv`)
 
-    subgraph UVM[UVM components]
-        TEST[ucie_rdi_pcie_sanity_test]
-        ENV[ucie_rdi_pcie_env]
-        RDI_AGENT[active ucie_rdi_agent]
-        RDI_SQR[ucie_rdi_sequencer]
-        RDI_DRV[ucie_rdi_driver]
-        RDI_MON[ucie_rdi_monitor]
-        PIPE_AGENT[configurable pcie_pipe_agent]
-        PIPE_MON[pcie_pipe_monitor]
-        SB[ucie_rdi_pcie_scoreboard]
-    end
+| Component | Role |
+|-----------|------|
+| `rdi_transaction` | 128-bit block payload tagged data vs ordered-set. |
+| `rdi_agent` (active) | RDI driver (clocking-block single-accept handshake) + monitor + sequencer. |
+| `rdi_monitor` (passive) | Publishes accepted RDI beats; `check_ready=0` variant sinks the RX (no-backpressure deframer output). |
+| `pipe7_mac_monitor` (passive) | Samples the PIPE MAC interface (Rate/Width/PowerDown, Tx valid). |
+| `pipe7_mac_scoreboard` | RDI-payload round-trip: recovered == driven, in order (analysis-fifo queue/drain). |
+| `ctrl_transaction` / `pipe7_ctrl_agent` | Control requests; the driver captures each request's outcome, command state, and PhyStatus latency. |
+| `pipe7_phy_agent` | PHY-responder BFM: watches PowerDown/Rate/Width and pulses `PhyStatus` after a latency (`phy_cb`); also drives `RxData` (loopback, `phy_rx_cb`). |
+| `pipe7_ctrl_scoreboard` | Independent legality model (Rate/Width legal only in P0/P1); checks outcome (done/req_error) + command state. |
+| `msgbus_transaction` / `pipe7_msgbus_agent` | Register read/writes; the driver captures the response. |
+| `pipe7_msgbus_responder` | Independently decodes M2P framing, drives P2M `read_completion`/`write_ack` from a local register model, publishes each decode. |
+| `pipe7_msgbus_scoreboard` | Pairs request with decode: checks M2P bytes vs an independent encode, cmd/addr/wdata, and read data / committed-write→read round-trip vs a register model. |
+| `pipe7_mac_env` | Instantiates and connects all of the above (agents, scoreboards, coverage). |
 
-    TEST --> ENV
-    ENV --> RDI_AGENT
-    ENV --> PIPE_AGENT
-    ENV --> SB
-    RDI_AGENT --> RDI_SQR
-    RDI_AGENT --> RDI_DRV
-    RDI_AGENT --> RDI_MON
-    PIPE_AGENT --> PIPE_MON
-    RDI_DRV --> RDI_IF
-    RDI_MON --> RDI_IF
-    PIPE_MON --> PIPE_IF
-    RDI_IF --> DUT
-    DUT --> PIPE_IF
-    RX_PIPE_IF --> DUT
-    DUT --> RX_RDI_IF
-    RDI_MON -- accepted RDI beats --> SB
-    PIPE_MON -- accepted PIPE beats --> SB
-```
+## Sequences & tests (`test/uvm/seq_lib/pipe7_seq_lib.sv`)
 
-## Transaction flow
+Sequences live in a separate package that imports `pipe7_mac_pkg` (so the env has no
+sequence/test dependency — avoids a circular package import).
 
-```mermaid
-sequenceDiagram
-    participant Seq as RDI sequence
-    participant Drv as RDI driver
-    participant Dut as DUT TX FIFO
-    participant RMon as RDI monitor
-    participant PMon as PIPE monitor
-    participant Sb as Scoreboard
+| Sequence | Intent |
+|----------|--------|
+| `pipe7_rdi_random_seq` / `_data_seq` / `_os_seq` | Random / data-only / ordered-set-only payloads. |
+| `pipe7_ctrl_directed_seq` | Power ladder + Gen5↔Gen6 rate + Width change + two illegal rate changes (P2, P0s). |
+| `pipe7_msgbus_directed_seq` | Uncommitted/committed writes, a preloaded read, and a committed-write→read round-trip. |
 
-    Seq->>Drv: ucie_rdi_transaction
-    Drv->>Dut: valid/data/error until any requested lane is ready
-    RMon->>Sb: push expected beat on valid & ready
-    Dut->>PMon: pipe_valid/data/error when FIFO data reaches PIPE domain
-    PMon->>Sb: observed PIPE beat on valid & ready
-    Sb->>Sb: pop per-lane queue and compare lower 16 data bits
-```
+| Test | Runs |
+|------|------|
+| `pipe7_mac_sanity_test` | Datapath round-trip only. |
+| `pipe7_ctrl_test` | Control-plane directed scenario (11 completions + 2 rejections). |
+| `pipe7_msgbus_test` | Message-bus directed scenario. |
+| `pipe7_rx_test` | RX-path round-trip (PHY-sourced RxData). |
+| `pipe7_full_test` (default) | Datapath + control + message bus concurrently. |
 
-The monitor and scoreboard operate per accepted beat, not per raw cycle. Because RDI and PIPE are asynchronous, matching is queue-based by lane rather than cycle-based.
+## Coverage model (item 11)
 
-## Component map
+Every covergroup reports its percentage via `get_coverage()` in `report_phase`; the directed
+`pipe7_full_test` is built to close every bin.
 
-| File | Component | Role |
-|------|-----------|------|
-| `test/uvm/uvm_test_top.sv` | `uvm_test_top` | Generates clocks/reset, instantiates interfaces and DUT, binds virtual interfaces with `uvm_config_db`, starts UVM. |
-| `test/uvm/ucie_rdi_if.sv` | `ucie_rdi_if` | RDI TX/RX signal bundle with driver and monitor clocking blocks. |
-| `test/uvm/pcie_pipe_if.sv` | `pcie_pipe_if` | PIPE TX/RX signal bundle with driver and monitor clocking blocks. |
-| `test/uvm/ucie_rdi_pcie_pkg.sv` | transaction classes | RDI and PIPE sequence items whose widths derive from the package parameters (`NUM_LANES`, `RDI_DATA_WIDTH`, `PIPE_DATA_WIDTH`). |
-| `test/uvm/ucie_rdi_pcie_pkg.sv` | `ucie_rdi_driver` | Drives RDI TX `valid`, `data`, and `error` through `ucie_rdi_if.drv_cb`. |
-| `test/uvm/ucie_rdi_pcie_pkg.sv` | `ucie_rdi_monitor` | Publishes RDI TX transactions when at least one lane completes `valid & ready`. |
-| `test/uvm/ucie_rdi_pcie_pkg.sv` | `pcie_pipe_monitor` | Publishes PIPE TX transactions when at least one lane completes `valid & ready`. |
-| `test/uvm/ucie_rdi_pcie_pkg.sv` | `ucie_rdi_pcie_scoreboard` | Maintains one expected queue per lane and compares observed PIPE beats against RDI expectations. |
-| `test/uvm/seq_lib/ucie_rdi_seq_lib.sv` | sequence library | Provides single-lane, all-lane, error, and repeated lane-1 traffic sequences. |
+| Covergroup | Coverpoints / crosses |
+|------------|-----------------------|
+| `cg_ctrl` | `cp_rate` (Gen5/Gen6), `cp_width` (10/20/40/80/160), `cp_pd` (P0/P0s/P1/P2), `cp_framing_mode` (Gen5-130b/Gen6-wide), `x_rate_width` |
+| `cg_req` | `cp_kind` (power/rate/width), `cp_done`, `cp_latency` (PhyStatus: immediate/short/long/over), `x_kind_done` |
+| `cg_op` | `cp_opcode` (read/write_uncommitted/write_committed), `cp_is_read` |
+| `cg_frame` | `cp_is_os` (data / ordered-set block) |
 
-## Sequence and coverage intent matrix
+## Relationship to the other tiers
 
-| Sequence | Stimulus | Intended check | Current checking strength |
-|----------|----------|----------------|---------------------------|
-| `ucie_rdi_single_lane_seq` | One lane-0 beat with `data == 64'hDEAD` | Basic lane-0 TX transport | Lower 16 bits and zero-extended upper half on lane 0. |
-| `ucie_rdi_multi_lane_seq` | One all-lane beat with lane-specific 16-bit words | Lane packing and independent per-lane queueing | Same per lane with observed PIPE handshake. |
-| `ucie_rdi_error_seq` | Lane-2 valid with `error[2] == 1` | Error propagation | **Error bit compared** on observed PIPE beats (with data/zero-extension checks). |
-| `ucie_rdi_flow_ctrl_seq` | Thirty-two lane-1 beats | Repeated traffic through FIFO | Data order checked if PIPE accepts all beats; paired with a backpressure sequence in the sanity test. |
-| `ucie_rdi_fifo_full_seq` | 24 all-lane beats, per-lane distinct incrementing payloads | TX FIFO-full / hold-under-stall on every lane | Paired with `pcie_pipe_deep_backpressure_seq`; scoreboard `check_phase` asserts `rdi_flow_ctrl` reached all lanes (FIFO full) and all beats drained in order. |
-| `pcie_pipe_deep_backpressure_seq` | PIPE ready low 128 cycles then high 400 cycles | Deep stall long enough to fill all TX FIFOs, then full drain | Drives the FIFO-full condition consumed by `ucie_rdi_fifo_full_seq` and the scoreboard occupancy check. |
-| `ucie_rdi_crc_seq` | Two lane-0 beats with CRC enabled | CRC residue smoke | `crc_enable[0]` is asserted around the sequence and the UVM top mirrors the residue compare. |
-| `pcie_pipe_backpressure_seq` | PIPE ready low/high/low/high | PIPE stall / release behavior | Drives `ready` low for 48 cycles, releases for 16, reasserts low for 16, then releases for 24. |
-| `pcie_pipe_rx_seq` | PIPE RX valid/data/error beats | PIPE -> RDI conversion and ordering | Mirrored RX queueing checks lower-half data and error propagation on accepted RX beats. |
-| `pcie_pipe_rx_single_lane_seq` | One lane-0 RX beat (`0xBEEF`) | Basic reverse-path transport | Mirrored RX queue checks lane-0 lower-half data. |
-| `pcie_pipe_rx_error_seq` | Lane-1 RX beat with `error[1]` | Reverse-path error propagation | Mirrored RX queue checks lane-1 data and error bit. |
-| `pcie_pipe_rx_burst_seq` | Four back-to-back lane-0 beats, incrementing payload | Reverse-path FIFO ordering | Mirrored RX queue verifies in-order delivery of the four payloads. |
-| `pcie_pipe_rx_rand_seq` | 12 constrained-random RX beats (valid != 0, random data/error) | Reverse-path robustness under varied traffic | Mirrored RX queue self-checks each accepted beat against the observed PIPE RX input. |
-| `ucie_rdi_rx_backpressure_seq` | `rdi_rx_ready` low/high/low/high | Reverse-path FIFO backpressure and hold-under-stall | Runs concurrently with `pcie_pipe_rx_rand_seq`; queues must drain once ready is released. |
+- **Verilator (Tier 1)** — the OSS release gate: RTL lint + the per-block self-checking smokes
+  (`make regress`) + line coverage. This is what actually runs per commit.
+- **PyUVM-on-Cocotb (Tier 1b)** — the runnable cross-check (`make cocotb`): independent Python
+  models 3-way-check the datapath, control plane, and message bus. Mirrors this env's taxonomy
+  1:1 so intent is shared and divergences compare like-for-like.
+- **UVM (Tier 2, this doc)** — the constrained-random / coverage growth path under VCS.
 
-## Scoreboard contract
+## Known scope / follow-ons
 
-| Expected behavior | Current implementation | Gap to close |
-|-------------------|------------------------|--------------|
-| Accepted **RDI** lane handshake creates one expected queue entry | `write_rdi()` pushes when `tr.valid[i] && tr.ready[i]` (monitor emits on full-beat handshakes) | None for TX enqueue semantics. |
-| Accepted **PIPE** lane handshake consumes one expected entry | `write_pipe()` pops when `tr.valid[i] && tr.ready[i]` | None for TX dequeue semantics. |
-| RDI 16-bit data zero-extends into PIPE 32-bit data | Lower **and upper** 16 PIPE bits checked vs. zero-extension | None for width check on expectations driven from RDI. |
-| Error bit propagates from RDI to PIPE | `write_pipe()` compares `tr.error[i]` vs. stored expectation | None for lanes exercised by sequences. |
-| End-of-test drains all TX expectation queues | `check_phase` reports `SB_DRAIN` if any `tx_exp_q[i]` non-empty | RX path / system-level closure still open. |
-| FIFO-full is actually reached when armed | Cycle-accurate `write_fc()` (from the TX RDI monitor's `fc_ap`, not the handshake-gated beat path) tracks peak per-lane `flow_ctrl`; `check_phase` reports `SB_FIFO_FULL` if `expect_fifo_full` is set but not all lanes went full | None for TX FIFO-full observability. |
-
-## Recommended UVM closure plan
-
-| Priority | Work item | Why it matters |
-|----------|-----------|----------------|
-| 1 | Make transaction widths parameter-aware or centralize lane/data constants in a config object | **Delivered (centralization):** lane/data geometry lives in `ucie_rdi_pcie_pkg` parameters that drive the transaction widths, scoreboard slicing, coverage sample ports, and (via `uvm_test_top`) the interface/DUT instantiations. Remaining for a `NUM_LANES` sweep: generalize `seq_lib` stimulus vectors and covergroup bins. |
-| 2 | Extend scoreboard for RX path and full-system checks | TX path: **delivered** — per-lane `valid & ready` queueing, upper 16-bit zero check, error compare, and `check_phase` TX queue drain. RX path now has smoke-driver/queueing scaffolding. |
-| 3 | Expand PIPE backpressure coverage and decouple passive vs. active ready control | **Delivered.** The TX RDI monitor now publishes a cycle-accurate flow-control stream (`fc_ap`) that is *not* gated on the `valid & ready` handshake — necessary because `rdi_ready` and `rdi_flow_ctrl` are per-lane complements, so a full lane never produces a handshake beat. `ucie_rdi_fifo_full_seq` + `pcie_pipe_deep_backpressure_seq` drive every lane's TX FIFO to full; `cg_occupancy` (now fed from `fc_ap`) reaches its partial/all-lanes bins, and the scoreboard's `SB_FIFO_FULL` check proves the full condition was reached with in-order lossless drain. |
-| 4 | Expand RX path sequences and mirrored RDI RX scoreboard | **Delivered.** The sanity test runs single-lane, error, and 4-beat burst RX sequences plus 12-beat constrained-random RX traffic (`pcie_pipe_rx_rand_seq`) driven concurrently with RDI RX backpressure (`ucie_rdi_rx_backpressure_seq`), all checked by the mirrored RX scoreboard. RX backpressure is enabled by a new `ctrl` clocking block on `ucie_rdi_if` and a `ucie_rdi_ready_driver`/sequencer in the env that stalls and releases `rdi_rx_ready`. |
-| 5 | Extend functional coverage to RX/TX direction, FIFO occupancy, width conversion, and CRC enable | **Delivered.** `ucie_rdi_pcie_coverage` samples: RX direction (`cg_rx_pipe`, `cg_rx_rdi`); width conversion (`cg_pipe_width` — zero-extension of the PIPE upper half plus lane-0 payload magnitude buckets); FIFO occupancy (`cg_occupancy` — `$countones(rdi flow_ctrl)` as an observable proxy for near-full elastic buffers, since true FIFO depth is internal); and CRC enable/error (`cg_crc`), routed to the TX PIPE monitor via new observation-only `crc_enable`/`crc_error` signals on `pcie_pipe_if`. |
-| 6 | Add a CRC predictor and broaden CRC coverage | Current smoke coverage validates the lane-0 residue path, but the model is still only a top-level checker. |
-
-## Run commands
-
-From `test/uvm/`:
-
-```bash
-make -f Makefile.vcs compile
-make -f Makefile.vcs run
-make -f Makefile.vcs run UVM_TESTNAME=ucie_rdi_pcie_sanity_test
-make -f Makefile.vcs pdf
-make -f Makefile.vcs clean
-```
-
-The UVM flow requires a licensed VCS installation with UVM 1.2 support. The repository's open-source CI path uses Verilator and does not compile UVM.
+- Gen6 wide-data UVM RX stimulus is deferred (needs the Gen5/Gen6 rate-mux + width gearbox);
+  the Gen6 raw path is proven by the Verilator `verilator_gen6` smoke and the PyUVM datapath.
+- The datapath uses a fixed Gen5 width (80); width-change-affects-datapath integration and
+  TxElecIdle data-phase gating are follow-ons.

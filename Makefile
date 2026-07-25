@@ -356,6 +356,7 @@ formal:
 	fi
 
 # ============================ Docs ============================
+DOCS_FINAL = docs/architecture.md docs/uvm_verification.md docs/verification_plan.md
 docs_check:
 	@echo "========== Checking documentation links and stale claims =========="
 	@test -f README.md
@@ -365,6 +366,11 @@ docs_check:
 	@test -f docs/uvm_verification.md
 	@! grep -R "| \*\*Line Coverage\*\* | 100%" README.md docs >/dev/null
 	@! grep -R "mirrors the coverage of the original SystemVerilog testbench" README.md docs >/dev/null
+	@# Item 12 sign-off: the finalized docs must describe THIS project, not the predecessor.
+	@if grep -REn "ucie_rdi_pcie_pkg|pipe_rx_agent|pcie_pipe_if" $(DOCS_FINAL) >/dev/null; then \
+		echo "docs_check: stale predecessor UVM reference in $(DOCS_FINAL)"; exit 1; fi
+	@grep -q "pipe7_mac_pkg" docs/uvm_verification.md || { echo "docs_check: uvm_verification.md must describe pipe7_mac_pkg"; exit 1; }
+	@grep -qi "coverage" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the coverage baseline"; exit 1; }
 	@echo "Documentation check passed"
 
 # ============================ Vendor simulators ============================
