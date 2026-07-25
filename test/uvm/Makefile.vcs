@@ -17,8 +17,11 @@ SRCS = ../../src/pipe7_pkg.sv \
        ../../src/pipe7_mac_ctrl_fsm.sv \
        ../../src/pipe7_tx_framer.sv \
        ../../src/pipe7_rx_deframer.sv \
+       ../../src/pipe7_msgbus_master.sv \
+       ../../src/pipe7_regfile.sv \
        ucie_rdi_if.sv \
        pipe7_ctrl_if.sv \
+       pipe7_msgbus_if.sv \
        pipe7_mac_if.sv \
        pipe7_mac_dut.sv \
        pipe7_mac_pkg.sv \
@@ -30,8 +33,8 @@ all: compile run
 compile:
 	$(VCS) $(SRCS) -l compile.log
 
-# Default: the combined datapath + control-plane test. Override TEST for the others
-# (pipe7_mac_sanity_test | pipe7_ctrl_test | pipe7_full_test).
+# Default: the combined datapath + control + message-bus test. Override TEST for the others
+# (pipe7_mac_sanity_test | pipe7_ctrl_test | pipe7_msgbus_test | pipe7_rx_test | pipe7_full_test).
 TEST ?= pipe7_full_test
 run:
 	./simv +UVM_TESTNAME=$(TEST) -l sim.log

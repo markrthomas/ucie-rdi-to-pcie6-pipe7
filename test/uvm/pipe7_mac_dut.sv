@@ -69,7 +69,27 @@ module pipe7_mac_dut
 
     // ---- Datapath status ----
     output logic                     block_locked,
-    output logic                     sync_error
+    output logic                     sync_error,
+
+    // ---- Message-bus request (controller -> master) ----
+    input  logic                      mb_req_valid,
+    input  logic                      mb_req_write,
+    input  logic                      mb_req_committed,
+    input  logic [MB_ADDR_WIDTH-1:0]  mb_req_addr,
+    input  logic [MB_DATA_WIDTH-1:0]  mb_req_wdata,
+    output logic                      mb_req_ready,
+    output logic                      mb_busy,
+    output logic                      mb_rsp_valid,
+    output logic                      mb_rsp_is_read,
+    output logic [MB_DATA_WIDTH-1:0]  mb_rsp_rdata,
+    output logic                      mb_rsp_error,
+
+    // ---- Message bus (MAC <-> PHY) ----
+    output logic [MB_BUS_WIDTH-1:0]   m2p_message_bus,
+    input  logic [MB_BUS_WIDTH-1:0]   p2m_message_bus,
+
+    // ---- MAC-side register file snapshot (observation) ----
+    output logic [8*MB_DATA_WIDTH-1:0] regfile_snapshot
 );
 
     // Control plane: PowerDown/Rate/Width sequencer gated on PhyStatus.
@@ -95,6 +115,29 @@ module pipe7_mac_dut
         .rx_data(rx_data), .rx_valid(rx_valid),
         .pl_valid(rdi_rx_valid), .pl_data(rdi_rx_data), .pl_is_os(rdi_rx_is_os),
         .block_locked(block_locked), .sync_error(sync_error)
+    );
+
+    // Message-bus master: frames register read/writes onto M2P, consumes P2M responses.
+    pipe7_msgbus_master mbus (
+        .pclk(clk), .reset_n,
+        .req_valid(mb_req_valid), .req_write(mb_req_write), .req_committed(mb_req_committed),
+        .req_addr(mb_req_addr), .req_wdata(mb_req_wdata),
+        .req_ready(mb_req_ready), .busy(mb_busy),
+        .rsp_valid(mb_rsp_valid), .rsp_is_read(mb_rsp_is_read), .rsp_rdata(mb_rsp_rdata),
+        .rsp_error(mb_rsp_error),
+        .m2p(m2p_message_bus), .p2m(p2m_message_bus)
+    );
+
+    // MAC-side register file (host port unused here; snapshot observed by the env).
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [MB_DATA_WIDTH-1:0] rf_host_rdata_nc;
+    logic                     rf_host_hit_nc;
+    /* verilator lint_on UNUSEDSIGNAL */
+    pipe7_regfile #(.NUM_REGS(8), .BASE_ADDR(REG_PHY_TX_CTRL_BASE)) rf (
+        .pclk(clk), .reset_n,
+        .host_we(1'b0), .host_re(1'b0), .host_addr('0), .host_wdata('0),
+        .host_rdata(rf_host_rdata_nc), .host_hit(rf_host_hit_nc),
+        .regs_flat(regfile_snapshot)
     );
 
 endmodule

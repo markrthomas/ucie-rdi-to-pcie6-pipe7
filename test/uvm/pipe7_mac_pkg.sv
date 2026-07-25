@@ -416,11 +416,18 @@ package pipe7_mac_pkg;
         endfunction
 
         task run_phase(uvm_phase phase);
+            fork
+                drive_phy_status();
+                loopback_rx();
+            join_none
+        endtask
+
+        // Answer each PowerDown/Rate/Width change with a single-cycle PhyStatus after `latency`.
+        task drive_phy_status();
             bit [3:0] prev_pd, prev_rate, cur_pd, cur_rate;
             bit [2:0] prev_w, prev_rxw, cur_w, cur_rxw;
             bit       servicing;
             int       cnt;
-            // Default the PHY-driven status/response signals.
             @(vif.phy_cb);
             vif.phy_cb.phy_status        <= 1'b0;
             vif.phy_cb.rx_status         <= 3'b000;
@@ -429,7 +436,6 @@ package pipe7_mac_pkg;
             vif.phy_cb.pclk_change_ok    <= 1'b0;
             vif.phy_cb.refclk_required_n <= 1'b1;
             vif.phy_cb.deep_pm_ack_n     <= 1'b1;
-            vif.phy_cb.p2m_message_bus   <= '0;
             prev_pd = vif.phy_cb.power_down; prev_rate = vif.phy_cb.rate;
             prev_w  = vif.phy_cb.width;      prev_rxw  = vif.phy_cb.rx_width;
             servicing = 1'b0; cnt = 0;
@@ -457,6 +463,20 @@ package pipe7_mac_pkg;
                         servicing = 1'b0;
                     end
                 end
+            end
+        endtask
+
+        // RX path (item 10): the PHY drives RxData. Here it loops the framed TxData back so the
+        // deframer recovers it (the mirrored-queue RX round-trip); an injecting RX driver that
+        // sources independent framed blocks is the natural next step.
+        task loopback_rx();
+            @(vif.phy_rx_cb);
+            vif.phy_rx_cb.rx_data  <= '0;
+            vif.phy_rx_cb.rx_valid <= 1'b0;
+            forever begin
+                @(vif.phy_rx_cb);
+                vif.phy_rx_cb.rx_data  <= vif.phy_rx_cb.tx_data;
+                vif.phy_rx_cb.rx_valid <= vif.phy_rx_cb.tx_data_valid;
             end
         endtask
     endclass
@@ -541,6 +561,271 @@ package pipe7_mac_pkg;
     endclass
 
     // ==================================================================
+    // Message bus (item 10): request transaction, active agent, PHY responder
+    // (independent M2P decode + P2M drive + register model), and a scoreboard.
+    // ==================================================================
+    class msgbus_transaction extends uvm_sequence_item;
+        rand bit                     write;
+        rand bit                     committed;
+        rand bit [MB_ADDR_WIDTH-1:0] addr;
+        rand bit [MB_DATA_WIDTH-1:0] wdata;
+        // Captured by the driver:
+        bit                          completed;
+        bit                          is_read;
+        bit [MB_DATA_WIDTH-1:0]      rdata;
+
+        // Keep addresses inside the responder's small register window (low nibble indexed).
+        constraint c_addr { addr inside {[REG_PHY_TX_CTRL_BASE : REG_PHY_TX_CTRL_BASE + 15]}; }
+
+        `uvm_object_utils_begin(msgbus_transaction)
+            `uvm_field_int(write,     UVM_ALL_ON)
+            `uvm_field_int(committed, UVM_ALL_ON)
+            `uvm_field_int(addr,      UVM_ALL_ON)
+            `uvm_field_int(wdata,     UVM_ALL_ON)
+        `uvm_object_utils_end
+
+        function new(string name = "msgbus_transaction");
+            super.new(name);
+        endfunction
+    endclass
+
+    // What the PHY responder independently decoded off M2P.
+    class msgbus_decoded extends uvm_object;
+        bit [3:0]                cmd;
+        bit [MB_ADDR_WIDTH-1:0]  addr;
+        bit [MB_DATA_WIDTH-1:0]  wdata;
+        bit [7:0]                bytes[$];   // exact M2P bytes consumed
+        `uvm_object_utils(msgbus_decoded)
+        function new(string name = "msgbus_decoded"); super.new(name); endfunction
+    endclass
+
+    class msgbus_driver extends uvm_driver #(msgbus_transaction);
+        `uvm_component_utils(msgbus_driver)
+        virtual pipe7_msgbus_if vif;
+        uvm_analysis_port #(msgbus_transaction) ap;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+            ap = new("ap", this);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db#(virtual pipe7_msgbus_if)::get(this, "", "mbus_vif", vif))
+                `uvm_fatal("NOVIF", "mbus_vif not set for msgbus_driver")
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            @(vif.drv_cb);
+            vif.drv_cb.req_valid <= 1'b0;
+            forever begin
+                msgbus_transaction tr;
+                seq_item_port.get_next_item(tr);
+                drive(tr);
+                ap.write(tr);
+                seq_item_port.item_done();
+            end
+        endtask
+
+        task drive(msgbus_transaction tr);
+            int wcnt;
+            @(vif.drv_cb);
+            vif.drv_cb.req_write     <= tr.write;
+            vif.drv_cb.req_committed <= tr.committed;
+            vif.drv_cb.req_addr      <= tr.addr;
+            vif.drv_cb.req_wdata     <= tr.wdata;
+            vif.drv_cb.req_valid     <= 1'b1;
+            @(vif.drv_cb);
+            vif.drv_cb.req_valid     <= 1'b0;
+            tr.completed = 1'b0;
+            for (wcnt = 0; wcnt < 300; wcnt++) begin
+                @(vif.drv_cb);
+                if (vif.drv_cb.rsp_valid === 1'b1) begin
+                    tr.completed = 1'b1;
+                    tr.is_read   = vif.drv_cb.rsp_is_read;
+                    tr.rdata     = vif.drv_cb.rsp_rdata;
+                    break;
+                end
+            end
+        endtask
+    endclass
+
+    class pipe7_msgbus_agent extends uvm_agent;
+        `uvm_component_utils(pipe7_msgbus_agent)
+        msgbus_driver                            drv;
+        uvm_sequencer #(msgbus_transaction)      seqr;
+        uvm_analysis_port #(msgbus_transaction)  ap;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            drv  = msgbus_driver::type_id::create("drv", this);
+            seqr = uvm_sequencer#(msgbus_transaction)::type_id::create("seqr", this);
+        endfunction
+
+        function void connect_phase(uvm_phase phase);
+            ap = drv.ap;
+            drv.seq_item_port.connect(seqr.seq_item_export);
+        endfunction
+    endclass
+
+    // PHY-side message-bus responder: independently decodes the M2P framing and answers on P2M
+    // (read_completion / write_ack) from a local register model. Publishes each decoded
+    // transaction. Mirrors pipe7_msgbus_responder_stub / the PyUVM MsgbusResponder.
+    class pipe7_msgbus_responder extends uvm_component;
+        `uvm_component_utils(pipe7_msgbus_responder)
+        virtual pipe7_mac_if vif;
+        int unsigned latency = 3;
+        uvm_analysis_port #(msgbus_decoded) ap;
+        bit [7:0] regs [16];
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+            ap = new("ap", this);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db#(virtual pipe7_mac_if)::get(this, "", "mac_vif", vif))
+                `uvm_fatal("NOVIF", "mac_vif not set for pipe7_msgbus_responder")
+            foreach (regs[i]) regs[i] = 8'hA0 + i[7:0];
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            typedef enum {IDLE, RD_LO, RC_DELAY, RC_DATA, WR_LO, WR_DATA, WACK_DELAY} rstate_e;
+            rstate_e                state;
+            bit [3:0]               cmd, addr_hi;
+            bit [MB_ADDR_WIDTH-1:0] addr;
+            bit                     committed;
+            bit [7:0]               seen[$];
+            int                     cnt;
+            bit [7:0]               m;
+            msgbus_decoded          dec;
+
+            @(vif.phy_cb);
+            vif.phy_cb.p2m_message_bus <= '0;
+            state = IDLE;
+            forever begin
+                @(vif.phy_cb);
+                vif.phy_cb.p2m_message_bus <= '0;
+                if (vif.phy_cb.reset_n !== 1'b1) begin
+                    state = IDLE;
+                    continue;
+                end
+                m = vif.phy_cb.m2p_message_bus;
+                case (state)
+                    IDLE: if (m != 8'h00) begin
+                        cmd = m[7:4]; addr_hi = m[3:0]; seen = {m};
+                        if (cmd == MB_READ) state = RD_LO;
+                        else if (cmd == MB_WRITE_UNCOMMIT || cmd == MB_WRITE_COMMIT) begin
+                            committed = (cmd == MB_WRITE_COMMIT); state = WR_LO;
+                        end
+                    end
+                    RD_LO: begin
+                        addr = {addr_hi, m}; seen.push_back(m); cnt = latency; state = RC_DELAY;
+                    end
+                    RC_DELAY: if (cnt > 1) cnt--; else begin
+                        vif.phy_cb.p2m_message_bus <= {MB_READ_COMPLETION, 4'h0}; state = RC_DATA;
+                    end
+                    RC_DATA: begin
+                        vif.phy_cb.p2m_message_bus <= regs[addr[3:0]];
+                        dec = msgbus_decoded::type_id::create("dec");
+                        dec.cmd = MB_READ; dec.addr = addr; dec.bytes = seen;
+                        ap.write(dec);
+                        state = IDLE;
+                    end
+                    WR_LO: begin addr = {addr_hi, m}; seen.push_back(m); state = WR_DATA; end
+                    WR_DATA: begin
+                        seen.push_back(m); regs[addr[3:0]] = m;
+                        dec = msgbus_decoded::type_id::create("dec");
+                        dec.cmd = committed ? MB_WRITE_COMMIT : MB_WRITE_UNCOMMIT;
+                        dec.addr = addr; dec.wdata = m; dec.bytes = seen;
+                        ap.write(dec);
+                        if (committed) begin cnt = latency; state = WACK_DELAY; end
+                        else state = IDLE;
+                    end
+                    WACK_DELAY: if (cnt > 1) cnt--; else begin
+                        vif.phy_cb.p2m_message_bus <= {MB_WRITE_ACK, 4'h0}; state = IDLE;
+                    end
+                    default: state = IDLE;
+                endcase
+            end
+        endtask
+    endclass
+
+    // Message-bus scoreboard: pairs each request (from the master) with the responder's
+    // independent decode, checking the M2P framing bytes, the decoded cmd/addr/wdata, and the
+    // read data against an independent register model.
+    class pipe7_msgbus_scoreboard extends uvm_scoreboard;
+        `uvm_component_utils(pipe7_msgbus_scoreboard)
+        uvm_tlm_analysis_fifo #(msgbus_transaction) req_fifo;
+        uvm_tlm_analysis_fifo #(msgbus_decoded)     dec_fifo;
+        bit [7:0]    model [16];
+        int unsigned n_txn;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            req_fifo = new("req_fifo", this);
+            dec_fifo = new("dec_fifo", this);
+            foreach (model[i]) model[i] = 8'hA0 + i[7:0];
+        endfunction
+
+        function bit [3:0] cmd_of(bit write, bit committed);
+            if (!write)         return MB_READ;
+            else if (committed) return MB_WRITE_COMMIT;
+            else                return MB_WRITE_UNCOMMIT;
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            msgbus_transaction tr;
+            msgbus_decoded     dec;
+            forever begin
+                req_fifo.get(tr);
+                dec_fifo.get(dec);
+                check(tr, dec);
+            end
+        endtask
+
+        function void check(msgbus_transaction tr, msgbus_decoded dec);
+            bit [3:0] exp_cmd = cmd_of(tr.write, tr.committed);
+            bit [7:0] exp_bytes[$];
+            exp_bytes = {{exp_cmd, tr.addr[MB_ADDR_WIDTH-1:8]}, tr.addr[7:0]};
+            if (tr.write) exp_bytes.push_back(tr.wdata);
+
+            n_txn++;
+            if (!tr.completed)
+                `uvm_error("MB_SB", "master never completed the transaction")
+            if (dec.cmd !== exp_cmd || dec.addr !== tr.addr)
+                `uvm_error("MB_SB", $sformatf("framing decode mismatch: cmd/addr %0h/0x%0h != %0h/0x%0h",
+                                              dec.cmd, dec.addr, exp_cmd, tr.addr))
+            if (dec.bytes != exp_bytes)
+                `uvm_error("MB_SB", $sformatf("M2P bytes %p != model %p", dec.bytes, exp_bytes))
+            if (tr.write) begin
+                if (dec.wdata !== tr.wdata)
+                    `uvm_error("MB_SB", $sformatf("decoded wdata 0x%02x != 0x%02x", dec.wdata, tr.wdata))
+                model[tr.addr[3:0]] = tr.wdata;   // track for later reads
+            end else begin
+                if (!tr.is_read)
+                    `uvm_error("MB_SB", "rsp_is_read=0 on a read")
+                if (tr.rdata !== model[tr.addr[3:0]])
+                    `uvm_error("MB_SB", $sformatf("read data 0x%02x != model 0x%02x",
+                                                  tr.rdata, model[tr.addr[3:0]]))
+            end
+        endfunction
+
+        function void report_phase(uvm_phase phase);
+            `uvm_info("MB_SB", $sformatf("message-bus transactions checked: %0d", n_txn), UVM_LOW)
+        endfunction
+    endclass
+
+    // ==================================================================
     // Environment
     // ==================================================================
     class pipe7_mac_env extends uvm_env;
@@ -554,8 +839,12 @@ package pipe7_mac_pkg;
         pipe7_framing_coverage  frame_cov;
         // Control plane (item 9)
         pipe7_ctrl_agent        ctrl_agent;     // active (PowerDown/Rate/Width requests)
-        pipe7_phy_agent         phy_agent;      // PHY-responder BFM (drives PhyStatus)
+        pipe7_phy_agent         phy_agent;      // PHY-responder BFM (PhyStatus + RX loopback)
         pipe7_ctrl_scoreboard   ctrl_sb;
+        // Message bus (item 10)
+        pipe7_msgbus_agent      mbus_agent;     // active (register read/write)
+        pipe7_msgbus_responder  mbus_resp;      // PHY-side M2P decode + P2M drive
+        pipe7_msgbus_scoreboard mbus_sb;
 
         function new(string name, uvm_component parent);
             super.new(name, parent);
@@ -577,16 +866,23 @@ package pipe7_mac_pkg;
             ctrl_agent = pipe7_ctrl_agent::type_id::create("ctrl_agent", this);
             phy_agent  = pipe7_phy_agent::type_id::create("phy_agent", this);
             ctrl_sb    = pipe7_ctrl_scoreboard::type_id::create("ctrl_sb", this);
+
+            mbus_agent = pipe7_msgbus_agent::type_id::create("mbus_agent", this);
+            mbus_resp  = pipe7_msgbus_responder::type_id::create("mbus_resp", this);
+            mbus_sb    = pipe7_msgbus_scoreboard::type_id::create("mbus_sb", this);
         endfunction
 
         function void connect_phase(uvm_phase phase);
-            // Datapath: TX driven payloads -> expected; RX recovered payloads -> actual.
+            // Datapath (RX round-trip): TX driven payloads -> expected; RX recovered -> actual.
             rdi_tx_agent.ap.connect(sb.exp_fifo.analysis_export);
             rdi_rx_mon.ap.connect(sb.act_fifo.analysis_export);
             rdi_rx_mon.ap.connect(frame_cov.analysis_export);
             mac_mon.ap.connect(ctrl_cov.analysis_export);
             // Control plane: each completed request -> legality scoreboard.
             ctrl_agent.ap.connect(ctrl_sb.fifo.analysis_export);
+            // Message bus: master requests + PHY-decoded transactions -> msgbus scoreboard.
+            mbus_agent.ap.connect(mbus_sb.req_fifo.analysis_export);
+            mbus_resp.ap.connect(mbus_sb.dec_fifo.analysis_export);
         endfunction
     endclass
 

@@ -53,10 +53,37 @@ spec-timed `PhyStatus`; the legality scoreboard confirms each request reaches th
 (11 completions + 2 rejections in the directed scenario) and the command state matches the
 model. `pipe7_full_test` runs the datapath round-trip and the control scenario concurrently.
 
-## Roadmap (PLAN.md items 10–12)
+## Item 10 — RX path + message-bus checker (this commit)
 
-- **10** — RX Gen5 130b + Gen6 wide-data stimulus, mirrored RX queues, message-bus transaction
-  scoreboard (item-4 master + regfile).
+```
+pipe7_msgbus_if.sv        controller request/response interface for the message-bus master
+pipe7_mac_if.sv (added)   phy_rx_cb clocking block (PHY drives RxData in the rx_clk domain)
+pipe7_mac_dut.sv (added)  instantiates pipe7_msgbus_master + pipe7_regfile (M2P/P2M + snapshot)
+pipe7_mac_pkg.sv (added)  msgbus_transaction; pipe7_msgbus_agent (drives register read/writes,
+                          captures the response); pipe7_msgbus_responder (INDEPENDENTLY decodes
+                          the M2P framing, drives P2M read_completion/write_ack from a local
+                          register model, publishes each decode); pipe7_msgbus_scoreboard
+                          (pairs each request with the decode: checks the M2P bytes vs an
+                          independent encode, cmd/addr/wdata, and read data vs a register model).
+                          The pipe7_phy_agent now also drives RxData (loopback of the framed
+                          TxData) via phy_rx_cb -- the RX path is PHY-sourced, and the round-trip
+                          scoreboard is the mirrored-queue RX check.
+seq_lib/pipe7_seq_lib.sv  pipe7_msgbus_directed_seq + pipe7_msgbus_test, pipe7_rx_test; the
+                          combined pipe7_full_test now also runs the message-bus scenario.
+```
+
+**What it checks:** register read/writes are framed by the master, independently decoded by the
+PHY responder, and cross-checked (framing bytes + cmd/addr/wdata + read data / committed-write→
+read round-trip) — mirroring the PyUVM message-bus tier. The PHY now sources RxData so the
+deframe is genuinely PHY-driven.
+
+**Scope note:** the RX path exercises Gen5 128b/130b (loopback of the framed stream). Gen6
+wide-data UVM RX stimulus is a documented follow-on — the Gen6 raw path is already proven by the
+Verilator `verilator_gen6` smoke and the PyUVM datapath tier; folding it into this DUT needs the
+Gen5/Gen6 rate-mux + width gearbox (the same integration deferred elsewhere).
+
+## Roadmap (PLAN.md items 11–12)
+
 - **11** — functional-coverage closure (Rate×Width, PowerDown, framing-mode, msgbus-opcode,
   PhyStatus-latency covergroups); metrics in the README.
 - **12** — docs + coverage sign-off.

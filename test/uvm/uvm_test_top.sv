@@ -36,6 +36,8 @@ module uvm_test_top;
     ucie_rdi_if  #(.PAYLOAD_WIDTH(BLOCK_PAYLOAD)) rdi_tx_if (.clk(clk), .rst_n(rst_n));
     ucie_rdi_if  #(.PAYLOAD_WIDTH(BLOCK_PAYLOAD)) rdi_rx_if (.clk(clk), .rst_n(rst_n));
     pipe7_ctrl_if                                 ctrl_if   (.clk(clk), .rst_n(rst_n));
+    pipe7_msgbus_if #(.ADDR_WIDTH(MB_ADDR_WIDTH), .DATA_WIDTH(MB_DATA_WIDTH))
+                 mbus_if (.clk(clk), .rst_n(rst_n));
     pipe7_mac_if #(.TX_DATA_WIDTH(PIPE_WIDTH), .RX_DATA_WIDTH(PIPE_WIDTH))
                  mac_if (.pclk(clk), .rx_clk(rx_clk));
 
@@ -49,7 +51,6 @@ module uvm_test_top;
     assign mac_if.rx_ei_detect_disable   = 1'b0;
     assign mac_if.deep_pm_req_n          = 1'b1;
     assign mac_if.restore_n              = 1'b1;
-    assign mac_if.m2p_message_bus        = '0;       // message-bus master = item 10
 
     // --- DUT: control FSM + Gen5 datapath ---
     pipe7_mac_dut #(.PIPE_WIDTH(PIPE_WIDTH)) dut (
@@ -73,13 +74,21 @@ module uvm_test_top;
         // PIPE MAC Tx/Rx datapath
         .tx_data(mac_if.tx_data), .tx_data_valid(mac_if.tx_data_valid),
         .rx_data(mac_if.rx_data), .rx_valid(mac_if.rx_valid),
-        .block_locked(), .sync_error()
+        .block_locked(), .sync_error(),
+        // Message bus (request from mbus_if; M2P/P2M on mac_if)
+        .mb_req_valid(mbus_if.req_valid), .mb_req_write(mbus_if.req_write),
+        .mb_req_committed(mbus_if.req_committed), .mb_req_addr(mbus_if.req_addr),
+        .mb_req_wdata(mbus_if.req_wdata), .mb_req_ready(mbus_if.req_ready),
+        .mb_busy(mbus_if.busy), .mb_rsp_valid(mbus_if.rsp_valid),
+        .mb_rsp_is_read(mbus_if.rsp_is_read), .mb_rsp_rdata(mbus_if.rsp_rdata),
+        .mb_rsp_error(mbus_if.rsp_error),
+        .m2p_message_bus(mac_if.m2p_message_bus), .p2m_message_bus(mac_if.p2m_message_bus),
+        .regfile_snapshot()
     );
     assign rdi_rx_if.ready = 1'b1;    // RX sink always ready (deframer has no backpressure)
 
-    // --- PHY BFM: loopback TxData -> RxData (data). PhyStatus + status come from phy_agent. ---
-    assign mac_if.rx_data  = mac_if.tx_data;
-    assign mac_if.rx_valid = mac_if.tx_data_valid;
+    // PHY BFM (pipe7_phy_agent) drives RxData (loopback of the framed TxData) + PhyStatus;
+    // pipe7_msgbus_responder drives P2M. No datapath loopback assign here anymore.
 
     // --- UVM config + run ---
     initial begin
@@ -90,6 +99,8 @@ module uvm_test_top;
         uvm_config_db#(virtual pipe7_ctrl_if)::set(null, "*ctrl_agent.drv", "ctrl_vif",   ctrl_if);
         uvm_config_db#(virtual pipe7_mac_if)::set(null, "*ctrl_agent.drv",  "mac_vif",    mac_if);
         uvm_config_db#(virtual pipe7_mac_if)::set(null, "*phy_agent",       "mac_vif",    mac_if);
+        uvm_config_db#(virtual pipe7_msgbus_if)::set(null, "*mbus_agent.drv","mbus_vif",  mbus_if);
+        uvm_config_db#(virtual pipe7_mac_if)::set(null, "*mbus_resp",       "mac_vif",    mac_if);
         run_test("pipe7_full_test");
     end
 

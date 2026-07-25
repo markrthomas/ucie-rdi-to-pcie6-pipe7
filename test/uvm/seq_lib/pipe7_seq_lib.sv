@@ -109,6 +109,34 @@ package pipe7_seq_lib;
         endtask
     endclass
 
+    // ---------------- Message-bus sequences (item 10) ----------------
+    class pipe7_msgbus_base_seq extends uvm_sequence #(msgbus_transaction);
+        `uvm_object_utils(pipe7_msgbus_base_seq)
+        function new(string name = "pipe7_msgbus_base_seq"); super.new(name); endfunction
+
+        task do_txn(bit write, bit committed, bit [MB_ADDR_WIDTH-1:0] addr,
+                    bit [MB_DATA_WIDTH-1:0] wdata);
+            msgbus_transaction tr = msgbus_transaction::type_id::create("tr");
+            start_item(tr);
+            tr.write = write; tr.committed = committed; tr.addr = addr; tr.wdata = wdata;
+            finish_item(tr);
+        endtask
+    endclass
+
+    // Directed scenario mirroring the SV item-4 smoke: uncommitted/committed writes, a read of
+    // a preloaded address, and a committed-write -> read round-trip.
+    class pipe7_msgbus_directed_seq extends pipe7_msgbus_base_seq;
+        `uvm_object_utils(pipe7_msgbus_directed_seq)
+        function new(string name = "pipe7_msgbus_directed_seq"); super.new(name); endfunction
+        task body();
+            do_txn(1'b1, 1'b0, REG_PHY_TX_CTRL_BASE + 1, 8'h5A);   // write_uncommitted
+            do_txn(1'b1, 1'b1, REG_PHY_TX_CTRL_BASE + 2, 8'h3C);   // write_committed
+            do_txn(1'b0, 1'b0, REG_PHY_TX_CTRL_BASE + 5, 8'h00);   // read preloaded (0xA5)
+            do_txn(1'b1, 1'b1, REG_PHY_TX_CTRL_BASE + 7, 8'hE1);   // write_committed
+            do_txn(1'b0, 1'b0, REG_PHY_TX_CTRL_BASE + 7, 8'h00);   // read back -> 0xE1
+        endtask
+    endclass
+
     // ---------------- Tests ----------------
     class pipe7_mac_base_test extends uvm_test;
         `uvm_component_utils(pipe7_mac_base_test)
@@ -166,7 +194,37 @@ package pipe7_seq_lib;
         endtask
     endclass
 
-    // Combined: run the datapath round-trip and the control scenario together.
+    // Message-bus test: directed register read/writes checked by the msgbus scoreboard.
+    class pipe7_msgbus_test extends pipe7_mac_base_test;
+        `uvm_component_utils(pipe7_msgbus_test)
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        task run_phase(uvm_phase phase);
+            pipe7_msgbus_directed_seq seq;
+            phase.raise_objection(this);
+            seq = pipe7_msgbus_directed_seq::type_id::create("seq");
+            seq.start(env.mbus_agent.seqr);
+            #500ns;
+            phase.drop_objection(this);
+        endtask
+    endclass
+
+    // RX-path test: the PHY BFM drives RxData (loopback of the framed stream); the deframer
+    // recovers it and the round-trip (mirrored-queue) scoreboard checks the RX direction.
+    class pipe7_rx_test extends pipe7_mac_base_test;
+        `uvm_component_utils(pipe7_rx_test)
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        task run_phase(uvm_phase phase);
+            pipe7_rdi_random_seq seq;
+            phase.raise_objection(this);
+            seq = pipe7_rdi_random_seq::type_id::create("seq");
+            seq.n = 48;
+            seq.start(env.rdi_tx_agent.seqr);
+            #3000ns;
+            phase.drop_objection(this);
+        endtask
+    endclass
+
+    // Combined: datapath round-trip + control scenario + message-bus scenario together.
     class pipe7_full_test extends pipe7_mac_base_test;
         `uvm_component_utils(pipe7_full_test)
 
@@ -175,15 +233,18 @@ package pipe7_seq_lib;
         endfunction
 
         task run_phase(uvm_phase phase);
-            pipe7_rdi_random_seq     dseq;
-            pipe7_ctrl_directed_seq  cseq;
+            pipe7_rdi_random_seq      dseq;
+            pipe7_ctrl_directed_seq   cseq;
+            pipe7_msgbus_directed_seq mseq;
             phase.raise_objection(this);
             dseq = pipe7_rdi_random_seq::type_id::create("dseq");
             dseq.n = 32;
             cseq = pipe7_ctrl_directed_seq::type_id::create("cseq");
+            mseq = pipe7_msgbus_directed_seq::type_id::create("mseq");
             fork
                 dseq.start(env.rdi_tx_agent.seqr);
                 cseq.start(env.ctrl_agent.seqr);
+                mseq.start(env.mbus_agent.seqr);
             join
             #2000ns;
             phase.drop_objection(this);

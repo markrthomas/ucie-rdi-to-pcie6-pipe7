@@ -154,14 +154,21 @@ interface pipe7_mac_if #(
     endclocking
 
     // PHY-responder (BFM) clocking block: samples the MAC command/message-bus signals and
-    // drives the PHY-owned pclk-domain status/response signals (item 9). RxData/RxValid live in
-    // the rx_clk domain (rx_cb) and are driven separately (loopback BFM in the top).
+    // drives the PHY-owned pclk-domain status/response signals (item 9).
     clocking phy_cb @(posedge pclk);
         default input #1step output #1;
         input  reset_n, tx_data, tx_data_valid, power_down, rate, width, rx_width,
                tx_elec_idle, pclk_change_ack, async_power_change_ack, m2p_message_bus;
         output phy_status, rx_status, rx_elec_idle, rx_standby_status, pclk_change_ok,
                refclk_required_n, deep_pm_ack_n, p2m_message_bus;
+    endclocking
+
+    // PHY-side Rx clocking block (item 10): the RX BFM drives RxData/RxValid in the recovered
+    // rx_clk domain -- either looping TxData back or injecting independent framed data.
+    clocking phy_rx_cb @(posedge rx_clk);
+        default input #1step output #1;
+        input  tx_data, tx_data_valid;
+        output rx_data, rx_valid;
     endclocking
 `endif
 
