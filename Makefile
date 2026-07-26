@@ -15,9 +15,14 @@ VERILATOR_INC := $(VERILATOR_ROOT)/include
 VERILATOR_CPP_CORE = $(VERILATOR_INC)/verilated.cpp $(VERILATOR_INC)/verilated_vcd_c.cpp \
 	$(VERILATOR_INC)/verilated_threads.cpp
 
-# ---- Datapath-only pass-through smoke (item 1) ----
-VERILOG_RTL = src/pipe7_pkg.sv src/pipe7_cdc_elastic_buf.sv src/ucie_rdi_to_pipe7_mac_bridge.sv
-VERILOG_FILES = $(VERILOG_RTL) test/tb_pipe7_mac_bridge.sv
+# ---- Integrated bridge (item 20): full composition presenting the real PIPE MAC signal set ----
+BRIDGE_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_msgbus_master.sv \
+             src/pipe7_regfile.sv src/pipe7_rdi_ingress.sv src/pipe7_cdc_elastic_buf.sv \
+             src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv src/pipe7_mac_datapath.sv \
+             src/pipe7_rdi_egress.sv src/ucie_rdi_to_pipe7_mac_bridge.sv
+VERILOG_RTL = $(BRIDGE_RTL)
+BRIDGE_STUBS = test/pipe7_phy_responder_stub.sv test/pipe7_msgbus_responder_stub.sv
+VERILOG_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/pipe7_mac_bridge_assertions.sv test/tb_pipe7_mac_bridge.sv
 TOP_MODULE = tb_pipe7_mac_bridge
 TOP_SIMV = sim_top
 VERILOG_SIMV = test/sim_top.sv $(VERILOG_RTL)
@@ -25,7 +30,7 @@ VERILATOR_DIR = obj_dir
 COV_DIR = obj_dir_cov
 NL1_TOP = tb_pipe7_mac_bridge_nl1
 NL1_DIR = obj_dir_nl1
-NL1_FILES = $(VERILOG_RTL) test/tb_pipe7_mac_bridge_nl1.sv
+NL1_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_mac_bridge_nl1.sv
 # Item 2: PIPE MAC interface contract (define-guarded elaboration wrapper for lint).
 MAC_IF = test/uvm/pipe7_mac_if.sv
 # Item 3: PowerDown/Rate/Width control FSM (PhyStatus-gated) + responder stub.
@@ -188,29 +193,23 @@ regress_nl1: lint verilator_nl1
 
 # ============================ Verilator smokes ============================
 verilator:
-	@echo "========== Compiling with Verilator =========="
+	@echo "========== Integrated bridge smoke (Verilator --binary --timing --assert) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
-	$(VERILATOR) --trace -cc $(VERILOG_FILES) --top-module $(TOP_MODULE) -Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH -Wno-UNUSEDSIGNAL
-	cd $(VERILATOR_DIR) && make -f V$(TOP_MODULE).mk
-	cd $(VERILATOR_DIR) && g++ -o $(TOP_MODULE) ../sim_main.cpp V$(TOP_MODULE)__ALL.a \
-		-I. -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
-		$(VERILATOR_CPP_CORE) -pthread -lm
-	@echo "Running Verilator simulation..."
-	./$(VERILATOR_DIR)/$(TOP_MODULE)
+	rm -rf $(VERILATOR_DIR)
+	$(VERILATOR) --binary --timing --assert -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(TOP_MODULE) --Mdir $(VERILATOR_DIR) -o bridge_sim $(VERILOG_FILES)
+	@echo "Running integrated bridge smoke..."
+	./$(VERILATOR_DIR)/bridge_sim
 
 # NUM_LANES=1 parameter sanity (obj_dir_nl1/, sim_main_nl1.cpp).
 verilator_nl1:
-	@echo "========== Verilator NUM_LANES=1 smoke =========="
+	@echo "========== Integrated bridge reduced-config smoke =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
 	rm -rf $(NL1_DIR)
-	$(VERILATOR) --trace -cc $(NL1_FILES) --top-module $(NL1_TOP) \
-		-Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH -Wno-UNUSEDSIGNAL --Mdir $(NL1_DIR)
-	cd $(NL1_DIR) && make -f V$(NL1_TOP).mk
-	cd $(NL1_DIR) && g++ -o $(NL1_TOP) ../sim_main_nl1.cpp V$(NL1_TOP)__ALL.a \
-		-I. -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
-		$(VERILATOR_CPP_CORE) -pthread -lm
-	@echo "Running Verilator NL1 simulation..."
-	cd $(NL1_DIR) && ./$(NL1_TOP)
+	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(NL1_TOP) --Mdir $(NL1_DIR) -o nl1_sim $(NL1_FILES)
+	@echo "Running reduced-config bridge smoke..."
+	./$(NL1_DIR)/nl1_sim
 
 # Item 3: control-plane smoke -- PhyStatus-gated PowerDown/Rate/Width FSM.
 verilator_ctrl:
@@ -325,17 +324,13 @@ verilator_integ:
 
 # Verilator with coverage: separate build dir so normal obj_dir stays unchanged.
 verilator_cov:
-	@echo "========== Verilator with coverage =========="
+	@echo "========== Integrated bridge coverage (Verilator --binary --coverage) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
 	rm -rf $(COV_DIR)
-	$(VERILATOR) --coverage --trace -cc $(VERILOG_FILES) --top-module $(TOP_MODULE) \
-		-Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH -Wno-UNUSEDSIGNAL --Mdir $(COV_DIR)
-	cd $(COV_DIR) && make -f V$(TOP_MODULE).mk
-	cd $(COV_DIR) && g++ -DVM_COVERAGE=1 -o $(TOP_MODULE) ../sim_main.cpp V$(TOP_MODULE)__ALL.a \
-		-I. -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
-		$(VERILATOR_CPP_CORE) $(VERILATOR_INC)/verilated_cov.cpp -pthread -lm
-	@echo "Running Verilator simulation (coverage)..."
-	cd $(COV_DIR) && ./$(TOP_MODULE)
+	$(VERILATOR) --binary --timing --assert --coverage -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(TOP_MODULE) --Mdir $(COV_DIR) -o cov_sim $(VERILOG_FILES)
+	@echo "Running integrated bridge (coverage)..."
+	cd $(COV_DIR) && ./cov_sim
 	@echo "Coverage raw data: $(COV_DIR)/coverage.dat"
 	@if command -v verilator_coverage >/dev/null 2>&1; then \
 		cd $(COV_DIR) && verilator_coverage --write-info ../coverage.info coverage.dat && \
@@ -400,8 +395,8 @@ wave:
 lint:
 	@if [ -z "$(VERILATOR)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
 	$(VERILATOR) --lint-only -Wall -Isrc --top-module ucie_rdi_to_pipe7_mac_bridge $(VERILOG_RTL)
-	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN --top-module $(TOP_MODULE) $(VERILOG_FILES)
-	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN --top-module $(NL1_TOP) $(NL1_FILES)
+	$(VERILATOR) --lint-only -Wall --assert -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --top-module $(TOP_MODULE) $(VERILOG_FILES)
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --top-module $(NL1_TOP) $(NL1_FILES)
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-DECLFILENAME \
 		+define+PIPE7_MAC_IF_LINT --top-module pipe7_mac_if_lint_top $(MAC_IF)
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_ctrl_fsm $(CTRL_RTL)
