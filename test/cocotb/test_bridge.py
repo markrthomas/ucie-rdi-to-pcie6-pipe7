@@ -55,8 +55,10 @@ class BridgeTest(uvm_test):
 
         recovered = []
         stream = []
+        self.overflow = 0
         cocotb.start_soon(self._rx_sink(dut, recovered))
         cocotb.start_soon(self._tx_stream_mon(dut, stream))
+        cocotb.start_soon(self._overflow_mon(dut))
         await self._rdi_source(dut, driven_flits)
 
         # Drain: let the last blocks propagate through the CDC + deframer + egress.
@@ -130,6 +132,13 @@ class BridgeTest(uvm_test):
             if int(dut.reset_n.value) == 1 and int(dut.tx_data_valid.value) == 1:
                 stream.append(int(dut.tx_data.value))
 
+    async def _overflow_mon(self, dut):
+        """Item 26: no recovered block may be dropped by a full RX CDC in this envelope."""
+        while True:
+            await FallingEdge(dut.pclk)
+            if int(dut.reset_n.value) == 1 and int(dut.rx_overflow.value) == 1:
+                self.overflow += 1
+
     # ---- 3-way cross-check ----
     def _check(self, driven_flits, recovered, stream, blocks):
         errors = []
@@ -166,7 +175,11 @@ class BridgeTest(uvm_test):
             errors.append(f"framer/model stream mismatch: first diff at word #{first} "
                           f"(DUT {len(stream)} vs model {len(model_stream)} words)")
 
+        if self.overflow != 0:
+            errors.append(f"RX overflow fired {self.overflow}x (recovered block dropped)")
+
         self.logger.info(f"[SB] driven_flits={len(driven_flits)} recovered={len(recovered)} "
-                         f"stream_words={len(stream)} model_words={len(model_stream)}")
+                         f"stream_words={len(stream)} model_words={len(model_stream)} "
+                         f"rx_overflow={self.overflow}")
         assert not errors, "integrated-bridge cross-check failed:\n  " + "\n  ".join(errors)
         self.logger.info("[SB] integrated-bridge cross-check PASS (3-way agreement)")

@@ -49,7 +49,7 @@ module tb_pipe7_mac_bridge_nl1;
     logic [2:0]           width, rx_width;
     logic                 rx_standby, pclk_change_ack, phy_status, pclk_change_ok;
     logic [MB_BUS_WIDTH-1:0] m2p, p2m;
-    logic                 block_locked, sync_error, in_data_phase;
+    logic                 block_locked, sync_error, in_data_phase, rx_overflow;
     logic                 busy, done, req_error, mb_req_ready, mb_busy, mb_rsp_valid, mb_rsp_is_read, mb_rsp_error;
     logic [MB_DATA_WIDTH-1:0] mb_rsp_rdata;
 
@@ -66,7 +66,7 @@ module tb_pipe7_mac_bridge_nl1;
         .tx_data, .tx_data_valid, .tx_elec_idle, .power_down, .rate, .width, .rx_width,
         .rx_standby, .pclk_change_ack, .m2p_message_bus(m2p),
         .rx_data, .rx_valid(tx_data_valid), .phy_status, .pclk_change_ok, .p2m_message_bus(p2m),
-        .block_locked, .sync_error, .in_data_phase
+        .block_locked, .sync_error, .in_data_phase, .rx_overflow
     );
     assign rx_data = tx_data;
     pipe7_phy_responder_stub #(.LATENCY(4)) phy (
@@ -103,12 +103,19 @@ module tb_pipe7_mac_bridge_nl1;
         end
     end
 
+    // Item 26: the throttled operating point must keep PIPE-RX within the RDI sink drain rate,
+    // so no recovered block is ever dropped by a full RX CDC.
+    int ovf;
+    always_ff @(posedge pclk or negedge rst_n)
+        if (!rst_n) ovf <= 0; else if (rx_overflow) ovf <= ovf + 1;
+
     initial begin
         rst_n = 1'b0;
         repeat (6) @(negedge pclk);
         rst_n = 1'b1;
         wait (recv >= FLITS);
         repeat (6) @(negedge pclk);
+        if (ovf != 0) $fatal(1, "[BRIDGE MIN] FAIL  (RX overflow x%0d)", ovf);
         if (errors == 0) begin
             $display("[BRIDGE MIN] PASS  (%0d RDI blocks, CREDITS=%0d, locked=%0b)", N, CREDITS, block_locked);
             $finish;

@@ -47,6 +47,13 @@ integrated top drives the single-block Gen5 path at `PIPE_WIDTH`=80 (1 block/`pc
 to the block-payload CDC). The full-width gearbox + Gen5/Gen6 rate mux (`pipe7_mac_datapath_ra`)
 are proven standalone and are the drop-in for a 160-bit / Gen6-data-plane top.
 
+**RX has no PHY backpressure** (the deframer cannot stall `RxData`): a recovered block presented
+while the RX CDC is full is dropped, so the operating point must keep the PIPE-RX rate within the
+RDI sink's drain rate. The bridge surfaces each such drop on `rx_overflow` (a one-`pclk` pulse the
+controller latches/counts); the smokes bind an assertion that it never fires in the verified
+envelope (item 26). Sizing the RDI clock/width/credits so overflow is provably impossible is
+tracked as item 26's policy follow-through.
+
 Gen5 embeds a 2-bit sync header per 130-bit block (data `0b10` / ordered-set `0b01`). Gen6
 carries raw already-encoded data with no per-block header (the 256B flit + FEC + LCRC are built
 controller-side and arrive on RDI). Width/RxWidth ∈ {10,20,40,80,160}.

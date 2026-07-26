@@ -86,7 +86,7 @@ module uvm_test_top;
         // PIPE MAC Tx/Rx datapath
         .tx_data(mac_if.tx_data), .tx_data_valid(mac_if.tx_data_valid),
         .rx_data(mac_if.rx_data), .rx_valid(mac_if.rx_valid),
-        .block_locked(), .sync_error(), .in_data_phase(),
+        .block_locked(), .sync_error(), .in_data_phase(), .rx_overflow(),
         // Message bus (request from mbus_if; M2P/P2M on mac_if)
         .mb_req_valid(mbus_if.req_valid), .mb_req_write(mbus_if.req_write),
         .mb_req_committed(mbus_if.req_committed), .mb_req_addr(mbus_if.req_addr),

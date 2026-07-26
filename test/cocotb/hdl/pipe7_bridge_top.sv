@@ -64,7 +64,8 @@ module pipe7_bridge_top
     output logic [3:0]               rate,
     output logic                     block_locked,
     output logic                     sync_error,
-    output logic                     in_data_phase
+    output logic                     in_data_phase,
+    output logic                     rx_overflow
 );
 
     // PIPE MAC command / status nets.
@@ -87,7 +88,7 @@ module pipe7_bridge_top
         .tx_data, .tx_data_valid, .tx_elec_idle, .power_down, .rate, .width, .rx_width,
         .rx_standby, .pclk_change_ack, .m2p_message_bus(m2p),
         .rx_data, .rx_valid(tx_data_valid), .phy_status, .pclk_change_ok, .p2m_message_bus(p2m),
-        .block_locked, .sync_error, .in_data_phase
+        .block_locked, .sync_error, .in_data_phase, .rx_overflow
     );
 
     // PHY loopback + responders.

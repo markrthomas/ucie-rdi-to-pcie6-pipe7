@@ -79,6 +79,7 @@ module pipe7_mac_dut
     output logic                     block_locked,
     output logic                     sync_error,
     output logic                     in_data_phase,
+    output logic                     rx_overflow,
 
     // ---- Message-bus request (controller -> master) ----
     input  logic                      mb_req_valid,
@@ -117,7 +118,7 @@ module pipe7_mac_dut
         // PIPE MAC status / data in
         .rx_data, .rx_valid, .phy_status, .pclk_change_ok, .p2m_message_bus,
         // Status
-        .block_locked, .sync_error, .in_data_phase
+        .block_locked, .sync_error, .in_data_phase, .rx_overflow
     );
 
 endmodule

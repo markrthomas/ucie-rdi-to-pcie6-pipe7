@@ -91,7 +91,8 @@ module ucie_rdi_to_pipe7_mac_bridge
     // ---- Status / observability ----
     output logic                     block_locked,
     output logic                     sync_error,
-    output logic                     in_data_phase
+    output logic                     in_data_phase,
+    output logic                     rx_overflow       // recovered block dropped (RX CDC full)
 );
 
     localparam int PW = BLOCK_PAYLOAD + 1;   // CDC block-payload width {is_os, data128}
@@ -174,10 +175,10 @@ module ucie_rdi_to_pipe7_mac_bridge
     );
 
     // ================= RX: datapath -> CDC -> RDI egress =================
-    logic          rxc_rd_valid, rxc_rd_ready;
+    logic          rxc_rd_valid, rxc_rd_ready, rxc_wr_full;
     logic [PW-1:0] rxc_rd_data;
     /* verilator lint_off UNUSEDSIGNAL */
-    logic          rxc_wr_full, rxc_wr_ready, rxc_rd_error;
+    logic          rxc_wr_ready, rxc_rd_error;   // wr_ready mirrors !wr_full (unused); rd_error unused
     /* verilator lint_on UNUSEDSIGNAL */
 
     pipe7_cdc_elastic_buf #(.INPUT_DATA_WIDTH(PW), .OUTPUT_DATA_WIDTH(PW), .BUFFER_DEPTH(BUF_DEPTH)) rx_cdc (
@@ -194,5 +195,16 @@ module ucie_rdi_to_pipe7_mac_bridge
         .rdi_valid(rdi_rx_valid), .rdi_data(rdi_rx_data), .rdi_sob(rdi_rx_sob),
         .rdi_is_os(rdi_rx_is_os), .rdi_crd(rdi_rx_crd)
     );
+
+    // ================= RX overflow (no PHY backpressure) =================
+    // The deframer cannot backpressure the PHY, so a recovered block presented while the RX CDC
+    // is full is DROPPED (the CDC writes only on wr_valid && wr_ready). Surface each such drop as
+    // a one-pclk pulse so the controller can latch/count it; the operating point must keep the
+    // PIPE-RX rate within the RDI sink's drain rate (see docs/verification_plan.md). A real
+    // controller sizes the RDI clock/width/credits so this never fires.
+    always_ff @(posedge pclk or negedge rst_n) begin
+        if (!rst_n) rx_overflow <= 1'b0;
+        else        rx_overflow <= dp_rx_valid && rxc_wr_full;
+    end
 
 endmodule
