@@ -435,13 +435,13 @@ uvm_pdf docs_pdf:
 	$(UVM_MAKE) pdf
 
 # ============================ Formal ============================
-# SymbiYosys formal proofs in verification/formal/ (CDC buffer + FSM invariants).
+# SymbiYosys formal proofs in verification/formal/ (CDC buffer + credit FC + gearbox + data-phase).
 formal:
 	@if command -v sby >/dev/null 2>&1; then \
 		$(MAKE) -C $(CURDIR)/verification/formal; \
 	else \
 		echo "[FORMAL] sby not found; install SymbiYosys (OSS CAD Suite) to run formal"; \
-		echo "         Properties are in verification/formal/fifo_cdc_props.sv"; \
+		echo "         Proofs: verification/formal/{fifo_cdc,credit_fc,gearbox,dataphase}_props.sv"; \
 		exit 0; \
 	fi
 

@@ -1,0 +1,28 @@
+# dataphase.sby — SymbiYosys formal proof for the rate-aware datapath control plane (item 24).
+#
+#   bmc   — safety: TxElecIdle gating, rate-mux exclusivity, data-phase-only-from-P0
+#   cover — reachability: a Gen5 data phase and a Gen6 data phase
+
+[tasks]
+bmc
+cover
+
+[options]
+bmc:   mode bmc
+cover: mode cover
+depth 20
+
+[engines]
+smtbmc
+
+[script]
+read -define FORMAL
+read -sv dataphase_props.sv
+hierarchy -top dataphase_props
+proc
+opt
+flatten
+opt
+
+[files]
+dataphase_props.sv

@@ -1,0 +1,28 @@
+# gearbox.sby — SymbiYosys formal proof for the Gen5 128b/130b TX gearbox (item 24).
+#
+#   bmc   — safety: no over-accept, block-count bounded, accumulator never overflows
+#   cover — reachability: a two-block burst accept, and a word emit
+
+[tasks]
+bmc
+cover
+
+[options]
+bmc:   mode bmc
+cover: mode cover
+depth 30
+
+[engines]
+smtbmc
+
+[script]
+read -define FORMAL
+read -sv gearbox_props.sv
+hierarchy -top gearbox_props
+proc
+opt
+flatten
+opt
+
+[files]
+gearbox_props.sv

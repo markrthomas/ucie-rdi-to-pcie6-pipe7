@@ -2,3 +2,12 @@
 fifo_cdc/
 fifo_cdc_bmc/
 fifo_cdc_cover/
+credit_fc/
+credit_fc_bmc/
+credit_fc_cover/
+gearbox/
+gearbox_bmc/
+gearbox_cover/
+dataphase/
+dataphase_bmc/
+dataphase_cover/

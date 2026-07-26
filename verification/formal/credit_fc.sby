@@ -1,0 +1,28 @@
+# credit_fc.sby — SymbiYosys formal proof for the RDI egress credit flow control (item 24).
+#
+#   bmc   — safety: no underflow, no over-credit, index bounded, closed-loop invariant
+#   cover — reachability: credits reach 0 (in flight), then return to CREDITS (drained)
+
+[tasks]
+bmc
+cover
+
+[options]
+bmc:   mode bmc
+cover: mode cover
+depth 40
+
+[engines]
+smtbmc
+
+[script]
+read -define FORMAL
+read -sv credit_fc_props.sv
+hierarchy -top credit_fc_props
+proc
+opt
+flatten
+opt
+
+[files]
+credit_fc_props.sv
