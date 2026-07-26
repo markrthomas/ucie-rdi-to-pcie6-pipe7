@@ -6,7 +6,7 @@
 .PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
-        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_gen6 verilator_integ \
+        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_rate_dp verilator_gen6 verilator_integ \
         verilator_msgbus verilator_nl1 vivado wave waves xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
@@ -53,6 +53,11 @@ GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
 GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
 GEN6_TOP = tb_pipe7_gen6
 GEN6_DIR = obj_dir_gen6
+# Item 17: rate-aware MAC datapath (Gen5 gearbox / Gen6 raw mux) + TxElecIdle gating, assertions bound.
+RATE_DP_RTL = src/pipe7_pkg.sv src/pipe7_tx_framer_gb.sv src/pipe7_rx_deframer_gb.sv src/pipe7_gen6_datapath.sv src/pipe7_mac_datapath_ra.sv
+RATE_DP_FILES = $(RATE_DP_RTL) test/pipe7_mac_bridge_assertions.sv test/tb_pipe7_rate_dp.sv
+RATE_DP_TOP = tb_pipe7_rate_dp
+RATE_DP_DIR = obj_dir_rate_dp
 # Item 7: PIPE MAC protocol assertions (SVA) against a good control+framing scenario.
 ASSN_MOD = test/pipe7_mac_bridge_assertions.sv
 ASSN_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv
@@ -118,6 +123,7 @@ help:
 	@echo "  make verilator_framing_gb  full-width gearbox (up to 2 blocks/PCLK; W160 + W80)"
 	@echo "  make verilator_gen6    Gen6 (Rate=5) raw wide datapath + L0p + PAM4"
 	@echo "  make verilator_assn    PIPE protocol SVA assertions (Verilator --assert)"
+	@echo "  make verilator_rate_dp rate-aware datapath: Gen5 gearbox / Gen6 raw mux + EI gating"
 	@echo "  make verilator_integ   integrated EI-gated datapath + control + assertions bound"
 	@echo ""
 	@echo "Waveforms (GTKWave):"
@@ -160,7 +166,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_gen6 verilator_assn verilator_integ
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_rate_dp verilator_gen6 verilator_assn verilator_integ
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -238,6 +244,18 @@ verilator_framing_gb:
 		--top-module $(FRAMING_GB_TOP) --Mdir $(FRAMING_GB_DIR) -o framing_gb_sim $(FRAMING_GB_FILES)
 	@echo "Running Verilator gearbox framing smoke..."
 	./$(FRAMING_GB_DIR)/framing_gb_sim
+
+# Item 17: rate-aware datapath smoke -- Gen5 gearbox data + rate switch to Gen6 raw data, with
+# the item-7 assertions bound (TxElecIdle gating across the switch). --assert; $fatal on fail.
+verilator_rate_dp:
+	@echo "========== Verilator rate-aware datapath smoke (Gen5 gearbox + Gen6 raw) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
+	rm -rf $(RATE_DP_DIR)
+	$(VERILATOR) --binary --timing --assert -Isrc \
+		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(RATE_DP_TOP) --Mdir $(RATE_DP_DIR) -o rate_dp_sim $(RATE_DP_FILES)
+	@echo "Running Verilator rate-aware datapath smoke..."
+	./$(RATE_DP_DIR)/rate_dp_sim
 
 # Item 6: Gen6 datapath smoke -- Gen6 rate + L0p width via ctrl FSM, then wide round-trip.
 verilator_gen6:
@@ -361,6 +379,7 @@ lint:
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_rx_deframer src/pipe7_pkg.sv src/pipe7_rx_deframer.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_tx_framer_gb src/pipe7_pkg.sv src/pipe7_tx_framer_gb.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_rx_deframer_gb src/pipe7_pkg.sv src/pipe7_rx_deframer_gb.sv
+	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_datapath_ra src/pipe7_pkg.sv src/pipe7_tx_framer_gb.sv src/pipe7_rx_deframer_gb.sv src/pipe7_gen6_datapath.sv src/pipe7_mac_datapath_ra.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_gen6_datapath src/pipe7_pkg.sv src/pipe7_gen6_datapath.sv
 	$(VERILATOR) --lint-only -Wall -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_datapath src/pipe7_pkg.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv src/pipe7_mac_datapath.sv
 	$(VERILATOR) --lint-only -Wall --assert -Isrc -Wno-UNUSEDPARAM --top-module pipe7_mac_bridge_assertions src/pipe7_pkg.sv $(ASSN_MOD)
@@ -445,7 +464,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(RATE_DP_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
 	rm -f coverage.info
 	rm -f waves/*.vcd
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb
