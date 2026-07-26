@@ -6,7 +6,7 @@
 .PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
-        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_rate_dp verilator_rdi verilator_gen6 verilator_integ \
+        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
         verilator_msgbus verilator_nl1 vivado wave waves xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
@@ -63,6 +63,11 @@ RDI_RTL = src/pipe7_pkg.sv src/pipe7_rdi_ingress.sv src/pipe7_rdi_egress.sv
 RDI_FILES = $(RDI_RTL) test/tb_pipe7_rdi.sv
 RDI_TOP = tb_pipe7_rdi
 RDI_DIR = obj_dir_rdi
+# Item 19: RDI<->PCLK CDC of the block-payload stream.
+CDC_RTL = src/pipe7_pkg.sv src/pipe7_cdc_elastic_buf.sv
+CDC_FILES = $(CDC_RTL) test/tb_pipe7_cdc.sv
+CDC_TOP = tb_pipe7_cdc
+CDC_DIR = obj_dir_cdc
 # Item 7: PIPE MAC protocol assertions (SVA) against a good control+framing scenario.
 ASSN_MOD = test/pipe7_mac_bridge_assertions.sv
 ASSN_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv
@@ -130,6 +135,7 @@ help:
 	@echo "  make verilator_assn    PIPE protocol SVA assertions (Verilator --assert)"
 	@echo "  make verilator_rate_dp rate-aware datapath: Gen5 gearbox / Gen6 raw mux + EI gating"
 	@echo "  make verilator_rdi     UCIe RDI ingress/egress + credit flow-control round-trip"
+	@echo "  make verilator_cdc     RDI<->PCLK CDC of the block-payload stream (dual-clock)"
 	@echo "  make verilator_integ   integrated EI-gated datapath + control + assertions bound"
 	@echo ""
 	@echo "Waveforms (GTKWave):"
@@ -172,7 +178,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_rate_dp verilator_rdi verilator_gen6 verilator_assn verilator_integ
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -272,6 +278,16 @@ verilator_rdi:
 		--top-module $(RDI_TOP) --Mdir $(RDI_DIR) -o rdi_sim $(RDI_FILES)
 	@echo "Running Verilator RDI smoke..."
 	./$(RDI_DIR)/rdi_sim
+
+# Item 19: RDI<->PCLK CDC of the block-payload stream (dual-clock + backpressure round-trip).
+verilator_cdc:
+	@echo "========== Verilator RDI<->PCLK CDC smoke (block payload) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
+	rm -rf $(CDC_DIR)
+	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(CDC_TOP) --Mdir $(CDC_DIR) -o cdc_sim $(CDC_FILES)
+	@echo "Running Verilator CDC smoke..."
+	./$(CDC_DIR)/cdc_sim
 
 # Item 6: Gen6 datapath smoke -- Gen6 rate + L0p width via ctrl FSM, then wide round-trip.
 verilator_gen6:
@@ -482,7 +498,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
 	rm -f coverage.info
 	rm -f waves/*.vcd
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb
