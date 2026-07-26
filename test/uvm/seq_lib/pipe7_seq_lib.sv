@@ -14,28 +14,41 @@ package pipe7_seq_lib;
     import pipe7_mac_pkg::*;
 
     // ---------------- Sequences ----------------
+    // The integrated bridge front end is credit-based flit-level: two RDI_FLIT_WIDTH flits
+    // (sob=1 then sob=0, same is_os) reassemble one 128b/130b block. `n` counts blocks. A few
+    // trailing filler blocks flush the last real block through the framer (idle/SKP on a real
+    // link), so tests should send extra blocks past the count they check.
     class pipe7_rdi_base_seq extends uvm_sequence #(rdi_transaction);
         `uvm_object_utils(pipe7_rdi_base_seq)
         int unsigned n = 16;
+
         function new(string name = "pipe7_rdi_base_seq");
             super.new(name);
         endfunction
+
+        // Emit one block as a pair of flits with a shared ordered-set tag.
+        task do_block(bit is_os);
+            rdi_transaction f0 = rdi_transaction::type_id::create("f0");
+            rdi_transaction f1 = rdi_transaction::type_id::create("f1");
+            start_item(f0);
+            if (!f0.randomize() with { sob == 1'b1; is_os == local::is_os; })
+                `uvm_error("SEQ", "randomize failed")
+            finish_item(f0);
+            start_item(f1);
+            if (!f1.randomize() with { sob == 1'b0; is_os == local::is_os; })
+                `uvm_error("SEQ", "randomize failed")
+            finish_item(f1);
+        endtask
     endclass
 
-    // Random 128-bit payloads, randomly tagged data / ordered-set.
+    // Random blocks, randomly tagged data / ordered-set.
     class pipe7_rdi_random_seq extends pipe7_rdi_base_seq;
         `uvm_object_utils(pipe7_rdi_random_seq)
         function new(string name = "pipe7_rdi_random_seq");
             super.new(name);
         endfunction
         task body();
-            repeat (n) begin
-                rdi_transaction tr = rdi_transaction::type_id::create("tr");
-                start_item(tr);
-                if (!tr.randomize())
-                    `uvm_error("SEQ", "randomize failed")
-                finish_item(tr);
-            end
+            repeat (n) do_block($urandom_range(1));
         endtask
     endclass
 
@@ -46,13 +59,7 @@ package pipe7_seq_lib;
             super.new(name);
         endfunction
         task body();
-            repeat (n) begin
-                rdi_transaction tr = rdi_transaction::type_id::create("tr");
-                start_item(tr);
-                if (!tr.randomize() with { is_os == 1'b0; })
-                    `uvm_error("SEQ", "randomize failed")
-                finish_item(tr);
-            end
+            repeat (n) do_block(1'b0);
         endtask
     endclass
 
@@ -63,10 +70,23 @@ package pipe7_seq_lib;
             super.new(name);
         endfunction
         task body();
+            repeat (n) do_block(1'b1);
+        endtask
+    endclass
+
+    // Gen6-wide RX injection: random raw wide words fed to the aux rate-aware datapath's RX
+    // (item 22). The mirrored-queue scoreboard checks the datapath recovers them in order.
+    class pipe7_gen6_rx_seq extends uvm_sequence #(gen6_rx_transaction);
+        `uvm_object_utils(pipe7_gen6_rx_seq)
+        int unsigned n = 16;
+        function new(string name = "pipe7_gen6_rx_seq");
+            super.new(name);
+        endfunction
+        task body();
             repeat (n) begin
-                rdi_transaction tr = rdi_transaction::type_id::create("tr");
+                gen6_rx_transaction tr = gen6_rx_transaction::type_id::create("tr");
                 start_item(tr);
-                if (!tr.randomize() with { is_os == 1'b1; })
+                if (!tr.randomize())
                     `uvm_error("SEQ", "randomize failed")
                 finish_item(tr);
             end
@@ -236,15 +256,19 @@ package pipe7_seq_lib;
             pipe7_rdi_random_seq      dseq;
             pipe7_ctrl_directed_seq   cseq;
             pipe7_msgbus_directed_seq mseq;
+            pipe7_gen6_rx_seq         gseq;
             phase.raise_objection(this);
             dseq = pipe7_rdi_random_seq::type_id::create("dseq");
-            dseq.n = 32;
+            dseq.n = 32;                 // 32 blocks + trailing filler flushes the last block
             cseq = pipe7_ctrl_directed_seq::type_id::create("cseq");
             mseq = pipe7_msgbus_directed_seq::type_id::create("mseq");
+            gseq = pipe7_gen6_rx_seq::type_id::create("gseq");
+            gseq.n = 24;                 // Gen6-wide RX cross-check words
             fork
                 dseq.start(env.rdi_tx_agent.seqr);
                 cseq.start(env.ctrl_agent.seqr);
                 mseq.start(env.mbus_agent.seqr);
+                gseq.start(env.g6_rx_agent.seqr);
             join
             #2000ns;
             phase.drop_objection(this);

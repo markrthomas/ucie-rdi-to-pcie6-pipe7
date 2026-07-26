@@ -14,10 +14,11 @@ Run under VCS: `make -C test/uvm -f Makefile.vcs` (or `make uvm` at the repo roo
 | Area | Status |
 |------|--------|
 | Simulator target | Synopsys VCS, `-ntb_opts uvm-1.2` (`test/uvm/Makefile.vcs`). |
-| DUT | `pipe7_mac_dut` composes the real cores: `pipe7_mac_ctrl_fsm` (control), `pipe7_tx_framer`/`pipe7_rx_deframer` (Gen5 128b/130b datapath), `pipe7_msgbus_master` + `pipe7_regfile` (message bus). PIPE width 80 (Gen5 single-block-per-cycle framer). |
-| Interfaces | `pipe7_mac_if` (the real PIPE 7.1 MAC signal set, item 2), `ucie_rdi_if` (128b block payload), `pipe7_ctrl_if` (control requests), `pipe7_msgbus_if` (register requests). |
+| DUT | `pipe7_mac_dut` wraps the **integrated** `ucie_rdi_to_pipe7_mac_bridge` (item 22): credit-based flit UCIe RDI front end (rdi_clk domain) → RDI↔PCLK CDC → Gen5 128b/130b datapath → PIPE MAC, alongside `pipe7_mac_ctrl_fsm`, `pipe7_msgbus_master` + `pipe7_regfile`. Dual-clock (pclk + rdi_clk); PIPE width 80. |
+| Interfaces | `pipe7_mac_if` (the real PIPE 7.1 MAC signal set, item 2), `ucie_rdi_if` (credit-based `RDI_FLIT_WIDTH`=64 flits with `sob`/`is_os`), `pipe7_ctrl_if` (control requests), `pipe7_msgbus_if` (register requests), `pipe7_gen6_rx_if` (Gen6 raw wide RX). |
 | Control plane | Active `pipe7_ctrl_agent` drives PowerDown/Rate/Width; `pipe7_phy_agent` answers with spec-timed `PhyStatus`; `pipe7_ctrl_scoreboard` checks outcome + command state vs an independent legality model. |
-| Datapath (RX) | Active `rdi_agent` drives payloads; the PHY BFM sources `RxData` (loopback of the framed stream); the round-trip scoreboard is the mirrored-queue RX check. |
+| Datapath (RX) | Active `rdi_agent` drives credit-gated flits; the PHY BFM loops `RxData` back; the round-trip scoreboard checks recovered flits (data/sob/is_os) in order. |
+| Gen6-wide RX | `gen6_rx_agent` injects raw Gen6 words into an aux `pipe7_mac_datapath_ra` (held in Gen6 data phase); `pipe7_gen6_rx_scoreboard` mirrored-queue-checks the recovered words (the deferred item-10 follow-on). |
 | Message bus | Active `pipe7_msgbus_agent` drives reads/writes; `pipe7_msgbus_responder` independently decodes M2P and drives P2M; `pipe7_msgbus_scoreboard` checks framing + register round-trip. |
 | Coverage | Rate×Width, PowerDown-state, framing-mode, message-bus-opcode, PhyStatus-latency covergroups (see below). |
 
@@ -25,9 +26,11 @@ Run under VCS: `make -C test/uvm -f Makefile.vcs` (or `make uvm` at the repo roo
 
 | Component | Role |
 |-----------|------|
-| `rdi_transaction` | 128-bit block payload tagged data vs ordered-set. |
-| `rdi_agent` (active) | RDI driver (clocking-block single-accept handshake) + monitor + sequencer. |
-| `rdi_monitor` (passive) | Publishes accepted RDI beats; `check_ready=0` variant sinks the RX (no-backpressure deframer output). |
+| `rdi_transaction` | One UCIe RDI flit: `RDI_FLIT_WIDTH`-bit data + `sob` (start-of-block) + `is_os`; two flits reassemble a 128b block. |
+| `rdi_agent` (active) | Credit-gated flit driver (drives while a credit is held, folds returned credits back) + monitor + sequencer. |
+| `rdi_monitor` (passive) | Publishes accepted RDI flits (any beat with `valid`). |
+| `rdi_rx_sink` | Returns one credit per recovered RX flit so the bridge egress keeps draining. |
+| `gen6_rx_agent` / `pipe7_gen6_rx_scoreboard` | Injects raw Gen6 RX words (with an injection-order mirror) and checks the aux datapath's recovered words in order. |
 | `pipe7_mac_monitor` (passive) | Samples the PIPE MAC interface (Rate/Width/PowerDown, Tx valid). |
 | `pipe7_mac_scoreboard` | RDI-payload round-trip: recovered == driven, in order (analysis-fifo queue/drain). |
 | `ctrl_transaction` / `pipe7_ctrl_agent` | Control requests; the driver captures each request's outcome, command state, and PhyStatus latency. |

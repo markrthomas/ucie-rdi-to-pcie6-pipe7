@@ -2,26 +2,31 @@
 `timescale 1ns/1ps
 
 /**
- * pipe7_mac_dut -- datapath + control-plane DUT for the PIPE 7.1 MAC UVM env
- * (closure-plan items 8-9).
+ * pipe7_mac_dut -- UVM DUT wrapper for the PIPE 7.1 MAC bridge env (closure-plan item 22).
  *
- * Composes the MAC-owned cores into a single bridge block:
- *   - control plane: pipe7_mac_ctrl_fsm sequences PowerDown/Rate/Width toward the PHY, gated
- *     on PhyStatus (item 9). Its request interface is exposed as DUT ports for the UVM control
- *     agent; its command outputs drive the PIPE MAC command signals.
- *   - datapath: pipe7_tx_framer -> pipe7_rx_deframer (Gen5 128b/130b, item 8). RDI payload in
- *     -> framed TxData; RxData -> recovered RDI payload out.
+ * Retargeted at the INTEGRATED bridge: this now wraps the real
+ * `ucie_rdi_to_pipe7_mac_bridge` (item 20) rather than re-composing the cores. The env drives
+ * the credit-based, flit-level UCIe RDI front end (RDI_WIDTH-bit flits with a start-of-block
+ * marker) across the RDI clock domain, while the PIPE MAC command/status/message-bus signals
+ * live in the pclk domain -- so the wrapper carries both clocks and the bridge owns the
+ * RDI<->PCLK CDC internally.
  *
- * The UVM top loops TxData back to RxData through a PHY BFM and drives PhyStatus from the
- * PHY-responder agent, so both the datapath round-trip and the control-plane handshake close.
- * TX_DATA_WIDTH is a Gen5 SerDes width <= 130 (single-block-per-cycle framer), default 80.
+ * The bridge's datapath owns TxElecIdle (asserted except while transmitting; a data phase
+ * starts only in P0), so TxDataValid is never high while TxElecIdle is asserted.
+ *
+ * The Gen6-wide RX cross-check (item 22) is a separate aux datapath (`pipe7_mac_datapath_ra`)
+ * instantiated in the UVM top, since the integrated bridge's data plane is the single-block
+ * Gen5 path (rate-matched to the block-payload CDC, item 20).
  */
 module pipe7_mac_dut
     import pipe7_pkg::*;
 #(
-    parameter int PIPE_WIDTH = 80
+    parameter int PIPE_WIDTH = 80,
+    parameter int RDI_WIDTH  = 64,
+    parameter int CREDITS    = 8
 ) (
-    input  logic                     clk,
+    input  logic                     pclk,
+    input  logic                     rdi_clk,
     input  logic                     reset_n,
 
     // ---- Control request (controller -> FSM) ----
@@ -35,7 +40,7 @@ module pipe7_mac_dut
     output logic                     done,
     output logic                     req_error,
 
-    // ---- PIPE MAC command outputs (FSM -> PHY) ----
+    // ---- PIPE MAC command outputs (bridge -> PHY) ----
     output logic [3:0]               power_down,
     output logic [3:0]               rate,
     output logic [2:0]               width,
@@ -44,20 +49,23 @@ module pipe7_mac_dut
     output logic                     rx_standby,
     output logic                     pclk_change_ack,
 
-    // ---- PIPE MAC status inputs (PHY -> FSM) ----
+    // ---- PIPE MAC status inputs (PHY -> bridge) ----
     input  logic                     phy_status,
     input  logic                     pclk_change_ok,
 
-    // ---- RDI payload in (TX source) ----
+    // ---- UCIe RDI TX flit in (credit-gated) ----
     input  logic                     rdi_tx_valid,
-    input  logic [BLOCK_PAYLOAD-1:0] rdi_tx_data,
+    input  logic [RDI_WIDTH-1:0]     rdi_tx_data,
+    input  logic                     rdi_tx_sob,
     input  logic                     rdi_tx_is_os,
-    output logic                     rdi_tx_ready,
+    output logic [1:0]               rdi_tx_crd,
 
-    // ---- RDI payload out (RX sink) ----
+    // ---- UCIe RDI RX flit out ----
     output logic                     rdi_rx_valid,
-    output logic [BLOCK_PAYLOAD-1:0] rdi_rx_data,
+    output logic [RDI_WIDTH-1:0]     rdi_rx_data,
+    output logic                     rdi_rx_sob,
     output logic                     rdi_rx_is_os,
+    input  logic [1:0]               rdi_rx_crd,
 
     // ---- PIPE MAC Tx datapath (to PHY) ----
     output logic [PIPE_WIDTH-1:0]    tx_data,
@@ -70,6 +78,7 @@ module pipe7_mac_dut
     // ---- Datapath status ----
     output logic                     block_locked,
     output logic                     sync_error,
+    output logic                     in_data_phase,
 
     // ---- Message-bus request (controller -> master) ----
     input  logic                      mb_req_valid,
@@ -86,58 +95,29 @@ module pipe7_mac_dut
 
     // ---- Message bus (MAC <-> PHY) ----
     output logic [MB_BUS_WIDTH-1:0]   m2p_message_bus,
-    input  logic [MB_BUS_WIDTH-1:0]   p2m_message_bus,
-
-    // ---- MAC-side register file snapshot (observation) ----
-    output logic [8*MB_DATA_WIDTH-1:0] regfile_snapshot
+    input  logic [MB_BUS_WIDTH-1:0]   p2m_message_bus
 );
 
-    // Control plane: PowerDown/Rate/Width sequencer gated on PhyStatus.
-    pipe7_mac_ctrl_fsm #(.PCLK_IS_PHY_INPUT(1'b0)) fsm (
-        .pclk(clk), .reset_n,
-        .req_valid, .req_kind(ctrl_req_e'(req_kind)),
-        .req_power_down, .req_rate, .req_width, .req_rxwidth,
+    ucie_rdi_to_pipe7_mac_bridge #(
+        .PIPE_WIDTH(PIPE_WIDTH), .RDI_WIDTH(RDI_WIDTH), .CREDITS(CREDITS)
+    ) bridge (
+        .rst_n(reset_n), .rdi_clk, .pclk,
+        // UCIe RDI TX / RX (credit-based flits)
+        .rdi_tx_valid, .rdi_tx_data, .rdi_tx_sob, .rdi_tx_is_os, .rdi_tx_crd,
+        .rdi_rx_valid, .rdi_rx_data, .rdi_rx_sob, .rdi_rx_is_os, .rdi_rx_crd,
+        // Control request
+        .req_valid, .req_kind, .req_power_down, .req_rate, .req_width, .req_rxwidth,
         .busy, .done, .req_error,
-        .power_down, .rate, .width, .rx_width, .tx_elec_idle, .rx_standby, .pclk_change_ack,
-        .phy_status, .pclk_change_ok
-    );
-
-    // Datapath: Gen5 128b/130b framer -> deframer.
-    pipe7_tx_framer #(.PIPE_WIDTH(PIPE_WIDTH)) framer (
-        .clk, .reset_n,
-        .pl_valid(rdi_tx_valid), .pl_data(rdi_tx_data), .pl_is_os(rdi_tx_is_os),
-        .pl_ready(rdi_tx_ready),
-        .tx_data(tx_data), .tx_data_valid(tx_data_valid)
-    );
-
-    pipe7_rx_deframer #(.PIPE_WIDTH(PIPE_WIDTH)) deframer (
-        .clk, .reset_n,
-        .rx_data(rx_data), .rx_valid(rx_valid),
-        .pl_valid(rdi_rx_valid), .pl_data(rdi_rx_data), .pl_is_os(rdi_rx_is_os),
-        .block_locked(block_locked), .sync_error(sync_error)
-    );
-
-    // Message-bus master: frames register read/writes onto M2P, consumes P2M responses.
-    pipe7_msgbus_master mbus (
-        .pclk(clk), .reset_n,
-        .req_valid(mb_req_valid), .req_write(mb_req_write), .req_committed(mb_req_committed),
-        .req_addr(mb_req_addr), .req_wdata(mb_req_wdata),
-        .req_ready(mb_req_ready), .busy(mb_busy),
-        .rsp_valid(mb_rsp_valid), .rsp_is_read(mb_rsp_is_read), .rsp_rdata(mb_rsp_rdata),
-        .rsp_error(mb_rsp_error),
-        .m2p(m2p_message_bus), .p2m(p2m_message_bus)
-    );
-
-    // MAC-side register file (host port unused here; snapshot observed by the env).
-    /* verilator lint_off UNUSEDSIGNAL */
-    logic [MB_DATA_WIDTH-1:0] rf_host_rdata_nc;
-    logic                     rf_host_hit_nc;
-    /* verilator lint_on UNUSEDSIGNAL */
-    pipe7_regfile #(.NUM_REGS(8), .BASE_ADDR(REG_PHY_TX_CTRL_BASE)) rf (
-        .pclk(clk), .reset_n,
-        .host_we(1'b0), .host_re(1'b0), .host_addr('0), .host_wdata('0),
-        .host_rdata(rf_host_rdata_nc), .host_hit(rf_host_hit_nc),
-        .regs_flat(regfile_snapshot)
+        // Message-bus request
+        .mb_req_valid, .mb_req_write, .mb_req_committed, .mb_req_addr, .mb_req_wdata,
+        .mb_req_ready, .mb_busy, .mb_rsp_valid, .mb_rsp_is_read, .mb_rsp_rdata, .mb_rsp_error,
+        // PIPE MAC command / data out
+        .tx_data, .tx_data_valid, .tx_elec_idle, .power_down, .rate, .width, .rx_width,
+        .rx_standby, .pclk_change_ack, .m2p_message_bus,
+        // PIPE MAC status / data in
+        .rx_data, .rx_valid, .phy_status, .pclk_change_ok, .p2m_message_bus,
+        // Status
+        .block_locked, .sync_error, .in_data_phase
     );
 
 endmodule

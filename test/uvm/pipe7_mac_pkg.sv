@@ -20,15 +20,22 @@ package pipe7_mac_pkg;
     `include "uvm_macros.svh"
     import pipe7_pkg::*;
 
+    // UCIe RDI flit width driven/observed by the env (integrated bridge front end, item 22).
+    // Two flits (sob=1 then sob=0) reassemble one 128b block payload (BLOCK_PAYLOAD / RDI_FLIT_WIDTH).
+    localparam int RDI_FLIT_WIDTH = 64;
+    localparam int GEN6_RX_WIDTH  = 160;   // Gen6 raw wide RX word (x16 SerDes width)
+
     // ==================================================================
-    // Transaction
+    // Transaction: one UCIe RDI flit (credit-based flit-level front end)
     // ==================================================================
     class rdi_transaction extends uvm_sequence_item;
-        rand bit [BLOCK_PAYLOAD-1:0] data;
-        rand bit                     is_os;
+        rand bit [RDI_FLIT_WIDTH-1:0] data;
+        rand bit                      sob;     // start-of-block (first flit of a block)
+        rand bit                      is_os;   // ordered-set vs data block
 
         `uvm_object_utils_begin(rdi_transaction)
             `uvm_field_int(data,  UVM_ALL_ON)
+            `uvm_field_int(sob,   UVM_ALL_ON)
             `uvm_field_int(is_os, UVM_ALL_ON)
         `uvm_object_utils_end
 
@@ -37,7 +44,7 @@ package pipe7_mac_pkg;
         endfunction
 
         function string convert2string();
-            return $sformatf("data=0x%032x is_os=%0b", data, is_os);
+            return $sformatf("data=0x%016x sob=%0b is_os=%0b", data, sob, is_os);
         endfunction
     endclass
 
@@ -47,6 +54,7 @@ package pipe7_mac_pkg;
     class rdi_driver extends uvm_driver #(rdi_transaction);
         `uvm_component_utils(rdi_driver)
         virtual ucie_rdi_if vif;
+        int unsigned credits = 8;                   // initial credit budget (= bridge CREDITS)
 
         function new(string name, uvm_component parent);
             super.new(name, parent);
@@ -56,35 +64,44 @@ package pipe7_mac_pkg;
             super.build_phase(phase);
             if (!uvm_config_db#(virtual ucie_rdi_if)::get(this, "", "rdi_tx_vif", vif))
                 `uvm_fatal("NOVIF", "rdi_tx_vif not set for rdi_driver")
+            void'(uvm_config_db#(int unsigned)::get(this, "", "credits", credits));
         endfunction
 
         task run_phase(uvm_phase phase);
-            @(vif.drv_cb);
-            vif.drv_cb.valid <= 1'b0;   // idle via the clocking block (single driver)
+            int unsigned avail = credits;
+            @(vif.src_cb);
+            vif.src_cb.valid <= 1'b0;   // idle via the clocking block (single driver)
             forever begin
                 rdi_transaction tr;
                 seq_item_port.get_next_item(tr);
-                drive(tr);
+                drive(tr, avail);
                 seq_item_port.item_done();
             end
         endtask
 
-        // Single-accept handshake: assert valid, hold until a clocked sample shows ready,
-        // then deassert (one beat per posedge where ready is high).
-        task drive(rdi_transaction tr);
-            @(vif.drv_cb);
-            vif.drv_cb.data  <= tr.data;
-            vif.drv_cb.is_os <= tr.is_os;
-            vif.drv_cb.valid <= 1'b1;
-            do @(vif.drv_cb); while (vif.drv_cb.ready !== 1'b1);
-            vif.drv_cb.valid <= 1'b0;
+        // Credit-gated flit source: wait until a credit is available, then drive one flit for one
+        // beat. Returned credits (0..2/cycle) are folded back into the available budget.
+        task drive(rdi_transaction tr, ref int unsigned avail);
+            // Wait for a credit, absorbing returns while idle.
+            while (avail == 0) begin
+                @(vif.src_cb);
+                avail += vif.src_cb.crd;
+            end
+            @(vif.src_cb);
+            vif.src_cb.data  <= tr.data;
+            vif.src_cb.sob   <= tr.sob;
+            vif.src_cb.is_os <= tr.is_os;
+            vif.src_cb.valid <= 1'b1;
+            avail = avail - 1 + vif.src_cb.crd;
+            @(vif.src_cb);
+            vif.src_cb.valid <= 1'b0;
+            avail += vif.src_cb.crd;
         endtask
     endclass
 
     class rdi_monitor extends uvm_monitor;
         `uvm_component_utils(rdi_monitor)
         virtual ucie_rdi_if vif;
-        bit check_ready = 1'b1;                     // TX honors ready; RX (deframer) has none
         uvm_analysis_port #(rdi_transaction) ap;
 
         function new(string name, uvm_component parent);
@@ -96,19 +113,44 @@ package pipe7_mac_pkg;
             super.build_phase(phase);
             if (!uvm_config_db#(virtual ucie_rdi_if)::get(this, "", "vif", vif))
                 `uvm_fatal("NOVIF", "vif not set for rdi_monitor")
-            void'(uvm_config_db#(bit)::get(this, "", "check_ready", check_ready));
         endfunction
 
+        // Credit-based stream: every beat with valid high is one accepted flit.
         task run_phase(uvm_phase phase);
             forever begin
                 @(vif.mon_cb);
-                if (vif.mon_cb.valid === 1'b1 &&
-                    (!check_ready || vif.mon_cb.ready === 1'b1)) begin
+                if (vif.mon_cb.valid === 1'b1) begin
                     rdi_transaction tr = rdi_transaction::type_id::create("tr");
                     tr.data  = vif.mon_cb.data;
+                    tr.sob   = vif.mon_cb.sob;
                     tr.is_os = vif.mon_cb.is_os;
                     ap.write(tr);
                 end
+            end
+        endtask
+    endclass
+
+    // RX sink: returns one credit per recovered flit so the bridge egress keeps draining.
+    class rdi_rx_sink extends uvm_component;
+        `uvm_component_utils(rdi_rx_sink)
+        virtual ucie_rdi_if vif;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db#(virtual ucie_rdi_if)::get(this, "", "vif", vif))
+                `uvm_fatal("NOVIF", "vif not set for rdi_rx_sink")
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            @(vif.snk_cb);
+            vif.snk_cb.crd <= 2'd0;
+            forever begin
+                @(vif.snk_cb);
+                vif.snk_cb.crd <= {1'b0, vif.snk_cb.valid};   // one credit per consumed flit
             end
         endtask
     endclass
@@ -232,6 +274,8 @@ package pipe7_mac_pkg;
         rdi_transaction cur;
         covergroup cg_frame;
             cp_is_os: coverpoint cur.is_os { bins data = {0}; bins os = {1}; }
+            cp_sob:   coverpoint cur.sob   { bins first = {1}; bins cont = {0}; }
+            x_sob_os: cross cp_sob, cp_is_os;
         endgroup
         function new(string name, uvm_component parent);
             super.new(name, parent);
@@ -334,7 +378,7 @@ package pipe7_mac_pkg;
             forever begin
                 act_fifo.get(act);
                 exp_fifo.get(exp);
-                if (act.data === exp.data && act.is_os === exp.is_os) begin
+                if (act.data === exp.data && act.is_os === exp.is_os && act.sob === exp.sob) begin
                     matched++;
                 end else begin
                     mismatched++;
@@ -902,13 +946,170 @@ package pipe7_mac_pkg;
     endclass
 
     // ==================================================================
+    // Gen6-wide RX cross-check (item 22): inject raw Gen6 words at the PHY RX and check the
+    // rate-aware datapath recovers them in order (mirrored RX queue). This closes the deferred
+    // item-10 follow-on -- an independent-RX path exercised outside the Gen5 loopback.
+    // ==================================================================
+    class gen6_rx_transaction extends uvm_sequence_item;
+        rand bit [GEN6_RX_WIDTH-1:0] data;
+
+        `uvm_object_utils_begin(gen6_rx_transaction)
+            `uvm_field_int(data, UVM_ALL_ON)
+        `uvm_object_utils_end
+
+        function new(string name = "gen6_rx_transaction");
+            super.new(name);
+        endfunction
+
+        function string convert2string();
+            return $sformatf("g6_word=0x%040x", data);
+        endfunction
+    endclass
+
+    class gen6_rx_driver extends uvm_driver #(gen6_rx_transaction);
+        `uvm_component_utils(gen6_rx_driver)
+        virtual pipe7_gen6_rx_if vif;
+        uvm_analysis_port #(gen6_rx_transaction) exp_ap;   // mirror: what we injected
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+            exp_ap = new("exp_ap", this);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db#(virtual pipe7_gen6_rx_if)::get(this, "", "g6_vif", vif))
+                `uvm_fatal("NOVIF", "g6_vif not set for gen6_rx_driver")
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            @(vif.drv_cb);
+            vif.drv_cb.rx_data  <= '0;
+            vif.drv_cb.rx_valid <= 1'b0;
+            forever begin
+                gen6_rx_transaction tr;
+                seq_item_port.get_next_item(tr);
+                @(vif.drv_cb);
+                vif.drv_cb.rx_data  <= tr.data;
+                vif.drv_cb.rx_valid <= 1'b1;
+                exp_ap.write(tr);                 // enqueue the mirror in injection order
+                @(vif.drv_cb);
+                vif.drv_cb.rx_valid <= 1'b0;
+                seq_item_port.item_done();
+            end
+        endtask
+    endclass
+
+    class gen6_rx_monitor extends uvm_monitor;
+        `uvm_component_utils(gen6_rx_monitor)
+        virtual pipe7_gen6_rx_if vif;
+        uvm_analysis_port #(gen6_rx_transaction) ap;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+            ap = new("ap", this);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db#(virtual pipe7_gen6_rx_if)::get(this, "", "g6_vif", vif))
+                `uvm_fatal("NOVIF", "g6_vif not set for gen6_rx_monitor")
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            forever begin
+                @(vif.mon_cb);
+                if (vif.mon_cb.g6_rx_valid === 1'b1) begin
+                    gen6_rx_transaction tr = gen6_rx_transaction::type_id::create("tr");
+                    tr.data = vif.mon_cb.g6_rx_data;
+                    ap.write(tr);
+                end
+            end
+        endtask
+    endclass
+
+    class gen6_rx_agent extends uvm_agent;
+        `uvm_component_utils(gen6_rx_agent)
+        gen6_rx_driver                            drv;
+        gen6_rx_monitor                           mon;
+        uvm_sequencer #(gen6_rx_transaction)      seqr;
+        uvm_analysis_port #(gen6_rx_transaction)  ap;      // recovered words
+        uvm_analysis_port #(gen6_rx_transaction)  exp_ap;  // injected mirror
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            mon  = gen6_rx_monitor::type_id::create("mon", this);
+            drv  = gen6_rx_driver::type_id::create("drv", this);
+            seqr = uvm_sequencer#(gen6_rx_transaction)::type_id::create("seqr", this);
+        endfunction
+
+        function void connect_phase(uvm_phase phase);
+            ap     = mon.ap;
+            exp_ap = drv.exp_ap;
+            drv.seq_item_port.connect(seqr.seq_item_export);
+        endfunction
+    endclass
+
+    // Mirrored-queue scoreboard: recovered raw word == injected word, in order.
+    class pipe7_gen6_rx_scoreboard extends uvm_scoreboard;
+        `uvm_component_utils(pipe7_gen6_rx_scoreboard)
+
+        uvm_tlm_analysis_fifo #(gen6_rx_transaction) exp_fifo;   // injected mirror
+        uvm_tlm_analysis_fifo #(gen6_rx_transaction) act_fifo;   // recovered
+        int unsigned matched;
+        int unsigned mismatched;
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            exp_fifo = new("exp_fifo", this);
+            act_fifo = new("act_fifo", this);
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            gen6_rx_transaction act, exp;
+            forever begin
+                act_fifo.get(act);
+                exp_fifo.get(exp);
+                if (act.data === exp.data) begin
+                    matched++;
+                end else begin
+                    mismatched++;
+                    `uvm_error("G6SB", $sformatf("Gen6-RX mismatch:\n  exp %s\n  act %s",
+                                                 exp.convert2string(), act.convert2string()))
+                end
+            end
+        endtask
+
+        function void check_phase(uvm_phase phase);
+            if (exp_fifo.used() != 0)
+                `uvm_error("G6SB", $sformatf("%0d injected words never recovered", exp_fifo.used()))
+            if (matched == 0)
+                `uvm_error("G6SB", "no Gen6-RX words matched (empty run?)")
+        endfunction
+
+        function void report_phase(uvm_phase phase);
+            `uvm_info("G6SB", $sformatf("Gen6-RX: matched=%0d mismatched=%0d", matched, mismatched),
+                      UVM_LOW)
+        endfunction
+    endclass
+
+    // ==================================================================
     // Environment
     // ==================================================================
     class pipe7_mac_env extends uvm_env;
         `uvm_component_utils(pipe7_mac_env)
 
-        rdi_agent               rdi_tx_agent;   // active (datapath)
-        rdi_monitor             rdi_rx_mon;     // passive (recovered payloads)
+        rdi_agent               rdi_tx_agent;   // active (RDI TX flit source)
+        rdi_monitor             rdi_rx_mon;     // passive (recovered RX flits)
+        rdi_rx_sink             rdi_rx_sink_c;  // returns credits on the RX stream
         pipe7_mac_monitor       mac_mon;
         pipe7_mac_scoreboard    sb;
         pipe7_mac_coverage      ctrl_cov;
@@ -924,6 +1125,9 @@ package pipe7_mac_pkg;
         // Coverage closure (item 11)
         pipe7_ctrl_coverage     req_cov;        // request kind/outcome/PhyStatus-latency
         pipe7_msgbus_coverage   mbus_cov;       // message-bus opcode
+        // Gen6-wide RX cross-check (item 22)
+        gen6_rx_agent           g6_rx_agent;    // active (raw Gen6 RX injector + mirror)
+        pipe7_gen6_rx_scoreboard g6_rx_sb;       // mirrored-queue RX scoreboard
 
         function new(string name, uvm_component parent);
             super.new(name, parent);
@@ -934,8 +1138,8 @@ package pipe7_mac_pkg;
             rdi_tx_agent = rdi_agent::type_id::create("rdi_tx_agent", this);
             uvm_config_db#(uvm_active_passive_enum)::set(this, "rdi_tx_agent", "is_active", UVM_ACTIVE);
 
-            rdi_rx_mon = rdi_monitor::type_id::create("rdi_rx_mon", this);
-            uvm_config_db#(bit)::set(this, "rdi_rx_mon", "check_ready", 1'b0);  // RX has no ready
+            rdi_rx_mon    = rdi_monitor::type_id::create("rdi_rx_mon", this);
+            rdi_rx_sink_c = rdi_rx_sink::type_id::create("rdi_rx_sink_c", this);
 
             mac_mon   = pipe7_mac_monitor::type_id::create("mac_mon", this);
             sb        = pipe7_mac_scoreboard::type_id::create("sb", this);
@@ -952,6 +1156,9 @@ package pipe7_mac_pkg;
 
             req_cov    = pipe7_ctrl_coverage::type_id::create("req_cov", this);
             mbus_cov   = pipe7_msgbus_coverage::type_id::create("mbus_cov", this);
+
+            g6_rx_agent = gen6_rx_agent::type_id::create("g6_rx_agent", this);
+            g6_rx_sb    = pipe7_gen6_rx_scoreboard::type_id::create("g6_rx_sb", this);
         endfunction
 
         function void connect_phase(uvm_phase phase);
@@ -968,6 +1175,9 @@ package pipe7_mac_pkg;
             // Coverage closure: control requests + message-bus transactions.
             ctrl_agent.ap.connect(req_cov.analysis_export);
             mbus_agent.ap.connect(mbus_cov.analysis_export);
+            // Gen6-wide RX cross-check: injected mirror -> expected; recovered -> actual.
+            g6_rx_agent.exp_ap.connect(g6_rx_sb.exp_fifo.analysis_export);
+            g6_rx_agent.ap.connect(g6_rx_sb.act_fifo.analysis_export);
         endfunction
     endclass
 
