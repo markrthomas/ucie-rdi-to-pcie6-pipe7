@@ -20,12 +20,25 @@ SRC  := $(ROOT)/src
 HDL  := $(ROOT)/test/cocotb/hdl
 
 # Per-test DUT sources + top. Each test drives a thin wrapper over the relevant RTL.
+TB := $(ROOT)/test
 ifeq ($(MODULE),test_ctrl_plane)
     VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_mac_ctrl_fsm.sv $(HDL)/pipe7_ctrl_top.sv
     TOPLEVEL = pipe7_ctrl_top
 else ifeq ($(MODULE),test_msgbus)
     VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_msgbus_master.sv $(SRC)/pipe7_regfile.sv $(HDL)/pipe7_msgbus_top.sv
     TOPLEVEL = pipe7_msgbus_top
+else ifeq ($(MODULE),test_bridge)
+    VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_mac_ctrl_fsm.sv $(SRC)/pipe7_msgbus_master.sv \
+        $(SRC)/pipe7_regfile.sv $(SRC)/pipe7_rdi_ingress.sv $(SRC)/pipe7_cdc_elastic_buf.sv \
+        $(SRC)/pipe7_tx_framer.sv $(SRC)/pipe7_rx_deframer.sv $(SRC)/pipe7_mac_datapath.sv \
+        $(SRC)/pipe7_rdi_egress.sv $(SRC)/ucie_rdi_to_pipe7_mac_bridge.sv \
+        $(TB)/pipe7_phy_responder_stub.sv $(TB)/pipe7_msgbus_responder_stub.sv \
+        $(HDL)/pipe7_bridge_top.sv
+    TOPLEVEL = pipe7_bridge_top
+else ifeq ($(MODULE),test_gen6_rx)
+    VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_tx_framer_gb.sv $(SRC)/pipe7_rx_deframer_gb.sv \
+        $(SRC)/pipe7_gen6_datapath.sv $(SRC)/pipe7_mac_datapath_ra.sv $(HDL)/pipe7_gen6_rx_top.sv
+    TOPLEVEL = pipe7_gen6_rx_top
 else
     VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_tx_framer.sv $(SRC)/pipe7_rx_deframer.sv $(HDL)/pipe7_framing_top.sv
     TOPLEVEL = pipe7_framing_top
@@ -43,14 +56,20 @@ include $(shell cocotb-config --makefiles)/Makefile.sim
 .DEFAULT_GOAL := sim
 
 # Each test drives a different TOPLEVEL, so sim_build must be cleaned between them.
-.PHONY: datapath ctrl_plane msgbus all_tests
+.PHONY: datapath ctrl_plane msgbus bridge gen6_rx all_tests
 datapath:
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_datapath
 ctrl_plane:
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_ctrl_plane
 msgbus:
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_msgbus
+bridge:
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_bridge
+gen6_rx:
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_gen6_rx
 all_tests:
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_datapath
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_ctrl_plane
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_msgbus
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_bridge
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_gen6_rx
