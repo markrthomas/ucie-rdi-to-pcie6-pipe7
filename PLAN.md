@@ -410,6 +410,64 @@ The design + verification were completed one item per commit (Verilator gate gre
 25. **Docs + coverage sign-off (this item).** architecture/interface/verification/UVM docs updated
     to the integrated IP; coverage baseline + formal + cocotb recorded; `docs_check` extended.
 
+### Hardening backlog (items 26+) — robustness + fidelity (planned)
+
+Items 16–25 deliver a functionally complete, green, three-tier-verified IP. The gaps below are
+robustness/fidelity hardening — several were surfaced *during* items 20–24 and are designed-around
+rather than handled. Same discipline: one numbered item per commit, lint-clean, `make regress`
+green each commit, `Co-Authored-By` trailer, commit only when asked.
+
+**Tier 1 — correctness hazards (do first)**
+
+26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
+    `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
+    sink makes `dp_rx_valid` write a **full** `rx_cdc` and the block is silently dropped (today the
+    NL1 test throttles TX to avoid this). *Deliver:* an RX-overflow status/error output + a bound
+    SVA (never `wr_valid && wr_full`), and a documented policy (drop-with-flag vs. provably-sized
+    RDI credits). Resolves the corresponding lint waiver (item 35).
+27. **Deframer accumulator overflow guard.** `pipe7_rx_deframer_gb` `rfill` grows ~+159 bits/cycle
+    under persistently misaligned input with `rx_valid` high (append 160, slip 1) and can exceed
+    `RACC_W` — safe only because aligned data / `rx_valid` gaps keep it bounded, nothing guarantees
+    it (why item-24 gearbox formal covers the framer, not the deframer). *Deliver:* a bounded-
+    accumulator clamp/flush + `sync_error` on overflow, and a formal proof under a stated alignment
+    assumption (extends item 24).
+28. **Control / message-bus completion timeout.** The control FSM waits indefinitely for
+    `PhyStatus`, and the msgbus master for a P2M completion — a hung PHY hangs the bridge (sim has a
+    max-latency *assertion* only, no RTL recovery). *Deliver:* parameterized completion watchdogs →
+    `req_error` / `mb_rsp_error` + recovery, with directed timeout tests.
+
+**Tier 2 — close the integration residual**
+
+29. **Fold the rate-aware datapath into the top.** Replace the single-block `pipe7_mac_datapath`
+    in the integrated top with `pipe7_mac_datapath_ra` (Gen6 data plane + full-width gearbox). The
+    gating design detail is **gearbox→CDC burst absorption** (up to 2 blocks/cycle into the
+    1-block/cycle block-payload CDC) — the risk flagged in the completion plan and never built at
+    the top. Makes the item-23 Gen6-wide RX cross-check run *through the bridge*, and unlocks Gen6
+    TX + width ∈ {40,160} end-to-end.
+30. **PAM4 config + width parameterization at the top.** Thread `PAM4RestrictedLevels` and
+    `Width`/`RxWidth` sub-width selection through the integrated top (only present in the standalone
+    rate-aware datapath today).
+
+**Tier 3 — verification fidelity**
+
+31. **Formal on the real RTL.** Add an SV frontend (`sv2v`, or Yosys + `slang`/synlig) so the
+    proofs bind to the actual modules instead of the hand-translated plain-Verilog re-models (which
+    can drift) — or add model↔RTL equivalence checking. Re-target the item-24 proofs.
+32. **True dual-clock CDC formal + reset synchronization.** The `fifo_cdc` proof ties
+    `wr_clk==rd_clk` (proves storage/flag consistency, not metastability-safe crossing). *Deliver:*
+    multi-clock formal, CDC/SDC constraints, and a reset-synchronization review of async `rst_n`
+    crossing both `rdi_clk` and `pclk`.
+33. **Formal-prove the ingress credit side.** Only egress credit FC is proven (item 24); prove
+    `pipe7_rdi_ingress` FIFO no-overflow / no-drop under a credit-honest sender.
+
+**Tier 4 — coverage + waiver closure**
+
+34. **Drive the error paths.** 88.93% line coverage is limited by exactly the error branches
+    (`pipe7_regfile` ~54%, `pipe7_mac_ctrl_fsm` ~74%): rejections, error responses, overflow.
+    Directed error stimulus to cover them (and thereby exercise the item-26/27/28 handling).
+35. **Resolve the `UNUSEDSIGNAL` waivers.** Each waiver (`rxc_wr_full`, `txc_rd_error`, …) marks an
+    ignored condition; resolving them is the RTL side of items 26–27. Target zero behavioral waivers.
+
 ---
 
 ## Verification (how to prove it end-to-end)
