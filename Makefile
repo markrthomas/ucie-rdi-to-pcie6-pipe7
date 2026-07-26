@@ -201,7 +201,7 @@ verilator:
 	@echo "Running integrated bridge smoke..."
 	./$(VERILATOR_DIR)/bridge_sim
 
-# NUM_LANES=1 parameter sanity (obj_dir_nl1/, sim_main_nl1.cpp).
+# Reduced-config parameter sanity (obj_dir_nl1/).
 verilator_nl1:
 	@echo "========== Integrated bridge reduced-config smoke =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
@@ -347,17 +347,15 @@ coverage_summary:
 	@awk 'BEGIN{lines=0;hit=0} /^DA:/ {split($$0,a,":"); split(a[2],b,","); lines++; if (b[2] > 0) hit++} END{printf "Line coverage: %d/%d = %.2f%%\n", hit, lines, (lines?100*hit/lines:0)}' coverage.info
 	@awk 'function flush(){if(file != ""){printf "  %-55s %4d/%-4d %6.2f%%\n", file, hit, lines, (lines?100*hit/lines:0)}} /^SF:/ {flush(); file=substr($$0,4); lines=0; hit=0} /^DA:/ {split($$0,a,":"); split(a[2],b,","); lines++; if (b[2] > 0) hit++} END{flush()}' coverage.info
 
-# Same as verilator with debug-friendly C++ flags.
+# Debug build of the integrated bridge smoke with waveform tracing (VCD at obj_dir/bridge.vcd).
 verilator_debug:
-	@echo "========== Compiling with Verilator (debug) =========="
+	@echo "========== Integrated bridge smoke (Verilator debug + trace) =========="
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
-	$(VERILATOR) --trace -cc $(VERILOG_FILES) --top-module $(TOP_MODULE) -Wno-INFINITELOOP -Wno-STMTDLY -Wno-WIDTH -Wno-UNUSEDSIGNAL
-	cd $(VERILATOR_DIR) && make -f V$(TOP_MODULE).mk
-	cd $(VERILATOR_DIR) && g++ -g -O0 -o $(TOP_MODULE) ../sim_main.cpp V$(TOP_MODULE)__ALL.a \
-		-I. -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
-		$(VERILATOR_CPP_CORE) -pthread -lm
-	@echo "Running Verilator simulation..."
-	./$(VERILATOR_DIR)/$(TOP_MODULE)
+	rm -rf $(VERILATOR_DIR)
+	$(VERILATOR) --binary --timing --assert --trace -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		+define+ENABLE_WAVES --top-module $(TOP_MODULE) --Mdir $(VERILATOR_DIR) -o bridge_dbg $(VERILOG_FILES)
+	./$(VERILATOR_DIR)/bridge_dbg +wavefile=$(VERILATOR_DIR)/bridge.vcd
+	@echo "VCD: $(VERILATOR_DIR)/bridge.vcd"
 
 # ============================ Waveforms ============================
 # waves: build the selected self-clocking TB with tracing (+define+ENABLE_WAVES arms the
@@ -386,10 +384,10 @@ gtkwave: waves
 		gtkwave $(WAVE_VCD) & \
 	fi
 
-# Legacy: open GTKWave on the datapath smoke's VCD (from sim_main.cpp).
+# Legacy: open GTKWave on the bridge debug VCD (make verilator_debug first).
 wave:
 	@echo "Opening GTKWave on $(VERILATOR_DIR)/dump.vcd..."
-	gtkwave $(VERILATOR_DIR)/dump.vcd &
+	gtkwave $(VERILATOR_DIR)/bridge.vcd &
 
 # ============================ Lint ============================
 lint:

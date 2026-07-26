@@ -26,10 +26,11 @@ detail is frozen (blocks items 2–12).
 
 Two-tier, mirroring the predecessor's methodology:
 
-- **Verilator** — open-source CI gate (`make regress`): lint + per-block self-checking smokes
-  (control FSM, message bus, Gen5 framing, Gen6 datapath, protocol SVA) + scoreboard, plus a
-  `NUM_LANES=1` param smoke and line coverage (`make regress_cov`; baseline **~85% line** on the
-  item-1 datapath smoke — the newer cores are covered by their own smokes + the tiers below).
+- **Verilator** — open-source CI gate (`make regress`): lint + the integrated-bridge end-to-end
+  smoke (RDI round-trip + control + message bus, assertions bound) plus per-block self-checking
+  smokes (control FSM, message bus, Gen5 framing + full-width gearbox, Gen6 datapath, rate-aware
+  datapath, RDI credit FC, CDC, protocol SVA), a reduced-config param smoke, and line coverage
+  (`make regress_cov`; baseline **~89% line (643/723)** on the integrated bridge).
 - **PyUVM-on-Cocotb** — runnable cross-check (`make cocotb`, a required CI gate): independent
   Python models 3-way cross-check the datapath, control plane, and message bus.
 - **UVM (VCS/UVM 1.2)** — authored-and-review-validated growth path (`make uvm`): RDI/control/

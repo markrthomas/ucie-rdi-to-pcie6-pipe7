@@ -96,10 +96,12 @@ via `make lint`.
 ## Coverage
 
 - **Line coverage** (`make regress_cov` → `coverage.info`; `make coverage_summary`): the
-  instrumented flow covers the **item-1 datapath smoke** — current baseline **~85% line**
-  (135/158). The newer cores (control FSM, framer/deframer, Gen6 datapath, message bus) are
-  covered by their own self-checking Verilator smokes, the PyUVM cross-checks, and the authored
-  UVM env rather than the single instrumented C++ harness.
+  instrumented flow now covers the **integrated-bridge end-to-end smoke**
+  (`tb_pipe7_mac_bridge`) — current baseline **~89% line** (643/723), up from the item-1
+  datapath baseline (135/158). Remaining uncovered lines are error/edge branches (e.g. RX
+  elastic-buffer overflow, message-bus error responses) exercised by the per-block self-checking
+  Verilator smokes, the PyUVM cross-checks, and the authored UVM env rather than the single
+  end-to-end smoke.
 - **Functional coverage** (Tier 2 UVM, item 11): Rate×Width, PowerDown-state, framing-mode,
   message-bus-opcode, and PhyStatus-latency covergroups; percentages via `get_coverage()` in
   `report_phase`.
