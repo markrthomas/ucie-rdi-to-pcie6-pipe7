@@ -81,6 +81,14 @@ divergences compare like-for-like. Three cross-checks execute via `make cocotb` 
 - **Message-bus** (`test_msgbus.py`) — register read/writes answered by an independent
   `MsgbusResponder`; M2P framing decoded independently and checked against the model's encoding,
   plus read data / a committed-write→read round-trip against a register model.
+- **Integrated bridge** (`test_bridge.py`, item 23) — drives the real
+  `ucie_rdi_to_pipe7_mac_bridge` (dual-clock, credit-based flit RDI, PHY loopback + responder
+  stubs) end-to-end; three-way check: recovered flits == driven flits; Python deframe of the DUT
+  `TxData` == the driven blocks; DUT `TxData` == an independent Python framer (bit-exact over the
+  overlap). `models/rdi_model.py` maps flits ↔ 128b blocks independently.
+- **Gen6-wide RX** (`test_gen6_rx.py`, item 23) — injects raw Gen6 wide words at the rate-aware
+  datapath's RX (held in Gen6 data phase) and mirrored-queue-checks the recovered stream against
+  `models/gen6_model.py` (identity, order-preserving) — the deferred item-10 follow-on.
 
 A key pyuvm gotcha handled here: `check_phase` runs **top-down** (parent before child), so all
 pass/fail assertions live in the leaf scoreboards' `check_phase`, not the test's (else the test
@@ -108,8 +116,18 @@ via `make lint`.
 
 ## Formal
 
-`make formal` (SymbiYosys) ports the predecessor's CDC/handshake proofs onto
-`pipe7_cdc_elastic_buf` and adds FSM safety props; skips cleanly if `sby` is absent.
+`make formal` (SymbiYosys) runs four BMC + cover proofs in `verification/formal/`; each is a
+faithful plain-Verilog model of the RTL core (Yosys's Verilog frontend cannot parse the SV
+package-import module headers). Skips cleanly if `sby` is absent.
+
+| Proof | Core | Properties |
+|-------|------|------------|
+| `fifo_cdc` | `pipe7_cdc_elastic_buf` | no overflow/underflow, flag consistency, output stability (ported) |
+| `credit_fc` | `pipe7_rdi_egress` | no underflow, no over-credit (`credits ≤ CREDITS`), `credits+outstanding == CREDITS` |
+| `gearbox` | `pipe7_tx_framer_gb` | `pl_acc ≤ pl_cnt`, `≤ 2`, `≤ room`; accumulator never overflows |
+| `dataphase` | `pipe7_mac_datapath_ra` | `TxElecIdle` gating, rate-mux exclusivity (no Gen5+Gen6 overlap), data-phase-only-from-P0 |
+
+All four PASS (BMC + cover).
 
 ## Exit criteria (per commit)
 

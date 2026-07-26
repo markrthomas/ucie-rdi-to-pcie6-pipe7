@@ -10,10 +10,12 @@ control/status), supporting **Gen5 (32 GT/s, 128b/130b)** and **Gen6 (64 GT/s, P
 
 ## Status
 
-Bring-up in progress. Execution follows [`PLAN.md`](PLAN.md) as a phased closure plan, one
-numbered item per commit. **Item 0 (spec cross-check)** must reconcile every placeholder
-constant against the controlled Intel PIPE 7.1 specification before interface/register
-detail is frozen (blocks items 2–12).
+Integrated IP complete. Execution followed [`PLAN.md`](PLAN.md) as a phased closure plan, one
+numbered item per commit. **Item 0 (spec cross-check)** reconciled every placeholder constant
+against the controlled Intel PIPE 7.1 specification; the cores (items 1–15) and the **integrated
+bridge + all-tier verification** (items 16–25: full-width gearbox, rate-aware datapath, credit-
+based UCIe RDI, RDI↔PCLK CDC, the integrated `ucie_rdi_to_pipe7_mac_bridge` top, and the
+Verilator / PyUVM / UVM / formal tiers) are delivered, with the Verilator gate green per commit.
 
 ## Scope
 
@@ -32,10 +34,14 @@ Two-tier, mirroring the predecessor's methodology:
   datapath, RDI credit FC, CDC, protocol SVA), a reduced-config param smoke, and line coverage
   (`make regress_cov`; baseline **~89% line (643/723)** on the integrated bridge).
 - **PyUVM-on-Cocotb** — runnable cross-check (`make cocotb`, a required CI gate): independent
-  Python models 3-way cross-check the datapath, control plane, and message bus.
-- **UVM (VCS/UVM 1.2)** — authored-and-review-validated growth path (`make uvm`): RDI/control/
-  message-bus agents, a PHY-responder BFM answering PowerDown/Rate/Width with spec-timed
-  `PhyStatus`, round-trip + legality + message-bus scoreboards, and the item-11 covergroups.
+  Python models cross-check the datapath, control plane, and message bus, **plus the integrated
+  bridge end-to-end** (`test_bridge.py`, 3-way) and a **Gen6-wide RX** check (`test_gen6_rx.py`).
+- **Formal (SymbiYosys)** — `make formal`: four BMC + cover proofs — CDC-buffer invariants, RDI
+  credit-FC (no underflow / over-credit), the Gen5 gearbox accept/accumulator bounds, and the
+  rate-aware datapath control (TxElecIdle gating, rate-mux exclusivity, data-phase-only-from-P0).
+- **UVM (VCS/UVM 1.2)** — authored-and-review-validated growth path (`make uvm`), retargeted at
+  the integrated bridge (credit/flit RDI, dual-clock) with a **Gen6-wide RX** agent + mirrored-
+  queue scoreboard, alongside the control/message-bus agents, PHY-responder BFM, and covergroups.
 
 See [`docs/`](docs/) and [`PLAN.md`](PLAN.md) for architecture, interface contract, and the
 verification plan.

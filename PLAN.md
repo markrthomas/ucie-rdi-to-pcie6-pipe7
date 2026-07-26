@@ -379,8 +379,36 @@ pieces. These follow-ons integrate them and close the gaps flagged along the way
     high while `TxElecIdle` is asserted. `test/tb_pipe7_integ.sv` composes it with the control
     FSM + PHY responder, **binds the item-7 assertions**, and proves P1 holds *non-vacuously*
     (plus a P2 negative: no data phase outside P0). `make verilator_integ`, wired into `regress`.
-- **Open:** the Gen5-at-160 two-blocks-per-`pclk` gearbox; Gen6-wide UVM RX stimulus; folding
-    `pipe7_mac_datapath` + the Gen5/Gen6 rate-mux into the `ucie_rdi_to_pipe7_mac_bridge` top.
+- ~~**Open:** the Gen5-at-160 two-blocks-per-`pclk` gearbox; Gen6-wide UVM RX stimulus; folding
+    `pipe7_mac_datapath` + the Gen5/Gen6 rate-mux into the `ucie_rdi_to_pipe7_mac_bridge` top.~~
+    **CLOSED by items 16–25** (below).
+
+### Completion plan (items 16–25) — integrated IP + all-tier verification (delivered)
+
+The design + verification were completed one item per commit (Verilator gate green each commit):
+
+16. **Gen5 full-width gearbox (delivered).** `src/pipe7_tx_framer_gb.sv` / `pipe7_rx_deframer_gb.sv`
+    accept/emit up to two 130b blocks per `pclk` (the width-160 ~1.23 blocks/cycle burst).
+    `make verilator_framing_gb`.
+17. **Rate-aware datapath (delivered).** `src/pipe7_mac_datapath_ra.sv` muxes the Gen5 gearbox vs
+    the Gen6 raw path by `Rate`, data-phase FSM owns `TxElecIdle`. `make verilator_rate_dp`.
+18. **UCIe RDI + credit flow control (delivered).** `src/pipe7_rdi_ingress.sv` /
+    `pipe7_rdi_egress.sv`: credit-based flit ↔ 128b block reassembly. `make verilator_rdi`.
+19. **RDI↔PCLK CDC of the block stream (delivered).** block-payload stream across
+    `pipe7_cdc_elastic_buf`. `make verilator_cdc`.
+20. **Integrated bridge top (delivered, replaces item 1).** `src/ucie_rdi_to_pipe7_mac_bridge.sv`
+    composes RDI ingress/egress (+credits) → CDC → Gen5 datapath → PIPE MAC, with the control FSM
+    + message bus, assertions bound. `make regress` end-to-end smoke `[BRIDGE] PASS`.
+21. **Scoreboard + NL1 + coverage baseline (delivered).** integrated round-trip scoreboard,
+    reduced-config `[BRIDGE MIN]` smoke, line-coverage baseline **643/723 = 88.93%**.
+22. **UVM env → integrated top (delivered).** `test/uvm/` retargeted at the integrated bridge
+    (credit/flit RDI, dual-clock) + **Gen6-wide RX** agent + mirrored-queue scoreboard.
+23. **PyUVM/Cocotb → integrated top (delivered).** `test/cocotb/test_bridge.py` (integrated
+    3-way cross-check) + `test_gen6_rx.py` (Gen6-wide RX), wired into `make cocotb` / `all_tests`.
+24. **Formal (delivered).** SymbiYosys proofs for CDC (ported), RDI credit FC, the Gen5 gearbox
+    accept/accumulator, and the data-phase/rate-mux control. `make formal` (all PASS).
+25. **Docs + coverage sign-off (this item).** architecture/interface/verification/UVM docs updated
+    to the integrated IP; coverage baseline + formal + cocotb recorded; `docs_check` extended.
 
 ---
 
@@ -406,7 +434,9 @@ pieces. These follow-ons integrate them and close the gaps flagged along the way
   scoreboard must agree with the DUT *and with each other*; any three-way disagreement fails
   the job and localizes the bug to DUT vs SV-TB vs Python-TB. Advisory in CI until stable, then
   a required gate. Runs in this OSS environment (unlike the VCS UVM tier).
-- **Formal:** `make formal` (SymbiYosys) for CDC-buf invariants + FSM safety props.
+- **Formal:** `make formal` (SymbiYosys) — CDC-buf invariants, RDI credit-FC no-underflow/
+  over-credit, the Gen5 gearbox accept/accumulator bounds, and the data-phase/rate-mux control
+  safety (TxElecIdle gating, no Gen5+Gen6 drive overlap, data-phase-only-from-P0). All PASS.
 
 ## Key reuse pointers (from predecessor repo)
 

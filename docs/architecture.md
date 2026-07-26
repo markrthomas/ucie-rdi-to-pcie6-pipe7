@@ -24,20 +24,28 @@ crosses RDI↔PCLK with pointer-only synchronization (no combinational data path
 | `pipe7_cdc_elastic_buf` | Dual-clock Gray-pointer elastic buffer (RDI↔PCLK). |
 | `pipe7_mac_ctrl_fsm` | PowerDown/Rate/Width sequencer, gated on `PhyStatus`; Rate/Width legal only in P0/P1 (§8.4.1). PCLK-as-PHY-input adds the `PclkChangeOk`→`PclkChangeAck` handshake. |
 | `pipe7_tx_framer` / `pipe7_rx_deframer` | **MAC-owned** Gen5 128b/130b block coding: the 2-bit sync header is embedded in TxData/RxData (no discrete sync-header/start-block pins in SerDes). The deframer recovers block alignment (sync-header hunt + bit-slip). |
+| `pipe7_tx_framer_gb` / `pipe7_rx_deframer_gb` | Full-width **gearbox** variants: accept/emit up to **two** 130b blocks per `pclk`, so the full SerDes width set {10..160} works (width-160 ≈ 1.23 blocks/cycle, bursts to two). |
 | `pipe7_mac_datapath` | Gen5 datapath (framer + deframer) with a **data-phase FSM that owns `TxElecIdle`**: asserted (idle) except while transmitting, so `TxDataValid` is never high while `TxElecIdle` is asserted (assertion P1). A data phase starts only in P0 and ends after the framer drains. |
+| `pipe7_mac_datapath_ra` | **Rate-aware** datapath: muxes the Gen5 gearbox vs the Gen6 raw path by `Rate`; the data-phase FSM owns `TxElecIdle` across both rates (rate-mux exclusivity + gating are formally proved). |
 | `pipe7_gen6_datapath` | Gen6 (Rate=5) raw wide datapath: no 128b/130b sync header (1b/1b at the PIPE datapath); carries the `PAM4RestrictedLevels` config. Flit/FEC/LCRC are controller-side. |
+| `pipe7_rdi_ingress` / `pipe7_rdi_egress` | **UCIe RDI credit flow control**: reassemble credit-gated RDI flits (`sob`/`is_os`) ↔ 128b block payloads; the sink advertises `CREDITS` slots and returns a credit per freed flit (no-underflow/over-credit is formally proved). |
 | `pipe7_msgbus_master` + `pipe7_regfile` | 8-bit M2P/P2M message-bus master (read = 2 cyc, write = 3 cyc; read_completion / write_ack) + MAC-side register file. |
-| `ucie_rdi_to_pipe7_mac_bridge` | Top; per-lane generate (item-1 datapath skeleton; core integration is progressive). |
+| `ucie_rdi_to_pipe7_mac_bridge` | **Integrated top** (item 20): RDI ingress/egress (+credits) → RDI↔PCLK CDC → Gen5 128b/130b datapath (`TxElecIdle`-gated) → PIPE MAC, alongside the control FSM and the message-bus master/regfile. Dual-clock (`rdi_clk` + `pclk`). |
 
 ## Datapath
 
 ```
-RDI payload ─► framer (Gen5 128b/130b)  ─► TxData / TxDataValid ─► (PHY)
-                or gen6_datapath (raw wide, Gen6)
+RDI TX flits ─► rdi_ingress (credits) ─► RDI↔PCLK CDC ─► framer (Gen5 128b/130b) ─► TxData ─► (PHY)
+   (rdi_clk)                                                or gen6_datapath (raw wide, Gen6)
 
-(PHY) ─► RxData / RxValid ─► deframer (Gen5 block align + sync check) ─► RDI payload
-                              or gen6_datapath (raw)
+(PHY) ─► RxData/RxValid ─► deframer (Gen5 block align + sync) ─► RDI↔PCLK CDC ─► rdi_egress ─► RDI RX flits
+                            or gen6_datapath (raw)                                              (rdi_clk)
 ```
+
+Two RDI_WIDTH-bit flits (`sob`=1 then `sob`=0, same `is_os`) reassemble one 128b block; the
+integrated top drives the single-block Gen5 path at `PIPE_WIDTH`=80 (1 block/`pclk`, rate-matched
+to the block-payload CDC). The full-width gearbox + Gen5/Gen6 rate mux (`pipe7_mac_datapath_ra`)
+are proven standalone and are the drop-in for a 160-bit / Gen6-data-plane top.
 
 Gen5 embeds a 2-bit sync header per 130-bit block (data `0b10` / ordered-set `0b01`). Gen6
 carries raw already-encoded data with no per-block header (the 256B flit + FEC + LCRC are built
