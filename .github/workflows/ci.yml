@@ -19,6 +19,8 @@ jobs:
 
       - name: Setup OSS CAD Suite (verilator, iverilog, sby)
         uses: YosysHQ/setup-oss-cad-suite@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Regression (lint + Verilator smoke)
         working-directory: ${{ github.workspace }}
@@ -32,6 +34,8 @@ jobs:
 
       - name: Setup OSS CAD Suite (verilator, iverilog, sby)
         uses: YosysHQ/setup-oss-cad-suite@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Lint already ran in sim; build cov model in obj_dir_cov and emit coverage.dat (+ coverage.info if verilator_coverage exists).
       - name: Verilator line coverage build and run
@@ -53,6 +57,8 @@ jobs:
 
       - name: Setup OSS CAD Suite (verilator, iverilog, sby)
         uses: YosysHQ/setup-oss-cad-suite@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: NUM_LANES=1 smoke (make verilator_nl1)
         working-directory: ${{ github.workspace }}
@@ -71,6 +77,8 @@ jobs:
 
       - name: Setup OSS CAD Suite (verilator, iverilog, sby)
         uses: YosysHQ/setup-oss-cad-suite@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-python@v5
         with:
