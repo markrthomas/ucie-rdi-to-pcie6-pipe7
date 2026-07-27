@@ -93,6 +93,10 @@ package pipe7_pkg;
     //     regfile's parameterizable window rather than fabricated.
     parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_TX_CTRL_BASE = 12'h400; // PHY Tx Control regs 0x400..0x40A (eq presets/de-emphasis/PAM4RestrictedLevels)
     parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_TX_CTRL_END  = 12'h40A; // inclusive top of the PHY Tx Control block
+    // Working sub-offset for PAM4RestrictedLevels within the PHY Tx Control block. The exact
+    // spec offset was not pinned by item 0 (see note above); the bridge uses this as the address
+    // whose committed write it also latches MAC-side to drive the Gen6 datapath's PAM4 config.
+    parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_PAM4_RESTRICTED_LEVELS = 12'h406;
     parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_RX_MARGIN_C0 = 12'h000; // PHY Rx Margin Control0 (§7.1 / G6)
     parameter logic [MB_ADDR_WIDTH-1:0] REG_PHY_RX_MARGIN_C1 = 12'h001; // PHY Rx Margin Control1
     parameter logic [MB_ADDR_WIDTH-1:0] REG_MAC_RX_MARGIN_S0 = 12'h000; // MAC Rx Margin Status0 (§7.2 / G6, MAC space)

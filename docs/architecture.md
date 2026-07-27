@@ -72,7 +72,10 @@ message-bus master carries the same watchdog on its `write_ack`/`read_completion
 completing a timed-out access with `rsp_valid` + `rsp_error`. Non-latency-sensitive control
 (Tx equalization presets/de-emphasis, `PAM4RestrictedLevels`, Rx margining) is programmed over
 the 8-bit message bus into the PHY register space; there is **no FEC register** on the PIPE
-interface.
+interface. A committed write to `REG_PHY_PAM4_RESTRICTED_LEVELS` is additionally **written
+through** into a MAC-side register that drives the Gen6 datapath's `PAM4RestrictedLevels` — the
+MAC's only PAM4 knob (item 30). `PIPE_WIDTH` is compile-parameterized (validated at 80 and 160);
+runtime sub-width lane selection is a datapath refinement.
 
 ## What crosses the PIPE boundary vs. not
 

@@ -421,7 +421,9 @@ green each commit, `Co-Authored-By` trailer, commit only when asked.
 
 **Delivered:** 26 (RX overflow flag + SVA), 27 (deframer accumulator guard + formal + directed
 test), 28 (control/msgbus completion watchdogs), 29 (rate-aware datapath + gearbox→CDC burst
-absorption folded into the top; `pipe7_rx_burst_fifo`; validated at width 80 **and 160**).
+absorption folded into the top; `pipe7_rx_burst_fifo`; validated at width 80 **and 160**),
+30 (PAM4RestrictedLevels write-through to the Gen6 datapath; PIPE_WIDTH compile-parameterized,
+validated at 80/160 — **runtime** sub-width lane selection deferred as a datapath refinement).
 
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
@@ -448,9 +450,13 @@ absorption folded into the top; `pipe7_rx_burst_fifo`; validated at width 80 **a
     1-block/cycle block-payload CDC) — the risk flagged in the completion plan and never built at
     the top. Makes the item-23 Gen6-wide RX cross-check run *through the bridge*, and unlocks Gen6
     TX + width ∈ {40,160} end-to-end.
-30. **PAM4 config + width parameterization at the top.** Thread `PAM4RestrictedLevels` and
-    `Width`/`RxWidth` sub-width selection through the integrated top (only present in the standalone
-    rate-aware datapath today).
+30. **PAM4 config + width parameterization at the top (delivered).** The bridge write-throughs a
+    committed message-bus write to `REG_PHY_PAM4_RESTRICTED_LEVELS` into a MAC-side register that
+    drives the Gen6 datapath's `PAM4RestrictedLevels` (checked in the integrated smoke). `PIPE_WIDTH`
+    is compile-parameterized end-to-end (item-29 smokes at 80 and 160). *Deferred:* **runtime**
+    sub-width lane selection (using `Width`/`RxWidth` to drive only the low N lanes within
+    `PIPE_WIDTH`) is a datapath refinement (`pipe7_mac_datapath_ra` runs at the physical width) —
+    tracked here for a follow-on.
 
 **Tier 3 — verification fidelity**
 

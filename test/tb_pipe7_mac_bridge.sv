@@ -185,6 +185,13 @@ module tb_pipe7_mac_bridge;
         do_mb(1'b0, 1'b0, REG_PHY_TX_CTRL_BASE + 3, 8'h00);
         if (mb_rsp_rdata !== 8'h9C) begin errors = errors + 1; $display("[BRIDGE] FAIL: mb read 0x%02x != 0x9C", mb_rsp_rdata); end
 
+        // Item 30: a committed write to the PAM4RestrictedLevels register is written through into
+        // the MAC-side PAM4 config that drives the Gen6 datapath.
+        do_mb(1'b1, 1'b1, REG_PHY_PAM4_RESTRICTED_LEVELS, 8'hA5);
+        if (dut.pam4_levels !== 8'hA5) begin
+            errors = errors + 1; $display("[BRIDGE] FAIL: PAM4 config 0x%02x != 0xA5", dut.pam4_levels);
+        end
+
         // Control: Gen5 -> Gen6 -> Gen5 rate change (idle; P0).
         do_ctrl(REQ_RATE, PD_P0, RATE_GEN6);
         if (rate !== RATE_GEN6) begin errors = errors + 1; $display("[BRIDGE] FAIL: rate != Gen6"); end

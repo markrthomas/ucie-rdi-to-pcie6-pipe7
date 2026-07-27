@@ -165,6 +165,18 @@ module ucie_rdi_to_pipe7_mac_bridge
     wire [1:0]     g5_pl_cnt   = txc_rd_valid ? 2'd1 : 2'd0;   // offer one block when buffered
     assign txc_rd_ready = |g5_pl_acc;                   // consume the CDC word when the framer took it
 
+    // ---- PAM4 config (item 30): the controller programs PAM4RestrictedLevels over the message
+    // bus toward the PHY; the bridge write-throughs the same committed write into a MAC-side
+    // register that drives the Gen6 datapath's PAM4 config (the MAC's only PAM4 knob). ----
+    logic [MB_DATA_WIDTH-1:0] pam4_levels;
+    wire mb_accept = mb_req_valid && mb_req_ready;
+    always_ff @(posedge pclk or negedge rst_n) begin
+        if (!rst_n)
+            pam4_levels <= '0;
+        else if (mb_accept && mb_req_write && (mb_req_addr == REG_PHY_PAM4_RESTRICTED_LEVELS))
+            pam4_levels <= mb_req_wdata;
+    end
+
     // ---- Rate-aware datapath (item 29): Gen5 128b/130b full-width gearbox + Gen6 raw, muxed by
     // Rate, TxElecIdle owned by its data-phase FSM. Gen6 TX is not driven from the top yet. ----
     logic [1:0]               g5_rx_cnt;
@@ -179,7 +191,7 @@ module ucie_rdi_to_pipe7_mac_bridge
 
     pipe7_mac_datapath_ra #(.PIPE_WIDTH(PIPE_WIDTH)) datapath (
         .clk(pclk), .reset_n(rst_n),
-        .rate, .power_down, .data_enable, .pam4_restricted_levels('0),
+        .rate, .power_down, .data_enable, .pam4_restricted_levels(pam4_levels),
         .g5_pl_cnt, .g5_pl_data0(txc_rd_data[BLOCK_PAYLOAD-1:0]), .g5_pl_is_os0(txc_rd_data[BLOCK_PAYLOAD]),
         .g5_pl_data1('0), .g5_pl_is_os1(1'b0), .g5_pl_acc,
         .g6_pl_valid(1'b0), .g6_pl_data('0), .g6_pl_ready(g6_pl_ready_nc),
