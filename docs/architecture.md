@@ -42,10 +42,13 @@ RDI TX flits ─► rdi_ingress (credits) ─► RDI↔PCLK CDC ─► framer (G
                             or gen6_datapath (raw)                                              (rdi_clk)
 ```
 
-Two RDI_WIDTH-bit flits (`sob`=1 then `sob`=0, same `is_os`) reassemble one 128b block; the
-integrated top drives the single-block Gen5 path at `PIPE_WIDTH`=80 (1 block/`pclk`, rate-matched
-to the block-payload CDC). The full-width gearbox + Gen5/Gen6 rate mux (`pipe7_mac_datapath_ra`)
-are proven standalone and are the drop-in for a 160-bit / Gen6-data-plane top.
+Two RDI_WIDTH-bit flits (`sob`=1 then `sob`=0, same `is_os`) reassemble one 128b block. The
+integrated top now uses the **rate-aware datapath** (`pipe7_mac_datapath_ra`, item 29): the Gen5
+full-width gearbox / Gen6 raw plane muxed by `Rate`. The gearbox can recover up to two blocks per
+`pclk` at width 160 (a block straddling two 160-bit words); a small **burst FIFO**
+(`pipe7_rx_burst_fifo`) absorbs the 0/1/2-per-cycle burst and drains one block/`pclk` into the
+block-payload CDC. So the top works across the width set (validated end-to-end at 80 and 160), as
+long as the RDI source rate keeps the recovered rate within the CDC drain (else `rx_overflow`).
 
 **RX has no PHY backpressure** (the deframer cannot stall `RxData`): a recovered block presented
 while the RX CDC is full is dropped, so the operating point must keep the PIPE-RX rate within the

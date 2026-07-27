@@ -30,7 +30,8 @@ else ifeq ($(MODULE),test_msgbus)
 else ifeq ($(MODULE),test_bridge)
     VERILOG_SOURCES = $(SRC)/pipe7_pkg.sv $(SRC)/pipe7_mac_ctrl_fsm.sv $(SRC)/pipe7_msgbus_master.sv \
         $(SRC)/pipe7_regfile.sv $(SRC)/pipe7_rdi_ingress.sv $(SRC)/pipe7_cdc_elastic_buf.sv \
-        $(SRC)/pipe7_tx_framer.sv $(SRC)/pipe7_rx_deframer.sv $(SRC)/pipe7_mac_datapath.sv \
+        $(SRC)/pipe7_tx_framer_gb.sv $(SRC)/pipe7_rx_deframer_gb.sv $(SRC)/pipe7_gen6_datapath.sv \
+        $(SRC)/pipe7_mac_datapath_ra.sv $(SRC)/pipe7_rx_burst_fifo.sv \
         $(SRC)/pipe7_rdi_egress.sv $(SRC)/ucie_rdi_to_pipe7_mac_bridge.sv \
         $(TB)/pipe7_phy_responder_stub.sv $(TB)/pipe7_msgbus_responder_stub.sv \
         $(HDL)/pipe7_bridge_top.sv

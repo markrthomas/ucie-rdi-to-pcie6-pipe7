@@ -6,7 +6,7 @@
 .PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
-        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_timeout verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
+        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
         verilator_msgbus verilator_nl1 vivado wave waves xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
@@ -18,7 +18,8 @@ VERILATOR_CPP_CORE = $(VERILATOR_INC)/verilated.cpp $(VERILATOR_INC)/verilated_v
 # ---- Integrated bridge (item 20): full composition presenting the real PIPE MAC signal set ----
 BRIDGE_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_msgbus_master.sv \
              src/pipe7_regfile.sv src/pipe7_rdi_ingress.sv src/pipe7_cdc_elastic_buf.sv \
-             src/pipe7_tx_framer.sv src/pipe7_rx_deframer.sv src/pipe7_mac_datapath.sv \
+             src/pipe7_tx_framer_gb.sv src/pipe7_rx_deframer_gb.sv src/pipe7_gen6_datapath.sv \
+             src/pipe7_mac_datapath_ra.sv src/pipe7_rx_burst_fifo.sv \
              src/pipe7_rdi_egress.sv src/ucie_rdi_to_pipe7_mac_bridge.sv
 VERILOG_RTL = $(BRIDGE_RTL)
 BRIDGE_STUBS = test/pipe7_phy_responder_stub.sv test/pipe7_msgbus_responder_stub.sv
@@ -63,6 +64,15 @@ TIMEOUT_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_msgbus_master
 TIMEOUT_FILES = $(TIMEOUT_RTL) test/tb_pipe7_timeout.sv
 TIMEOUT_TOP = tb_pipe7_timeout
 TIMEOUT_DIR = obj_dir_timeout
+# Item 29: RX burst-absorption skid FIFO unit test.
+BURST_RTL = src/pipe7_rx_burst_fifo.sv
+BURST_FILES = $(BURST_RTL) test/tb_pipe7_rx_burst_fifo.sv
+BURST_TOP = tb_pipe7_rx_burst_fifo
+BURST_DIR = obj_dir_burst
+# Item 29: integrated bridge at PIPE_WIDTH=160 (gearbox + burst-FIFO fold).
+W160_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_mac_bridge_w160.sv
+W160_TOP = tb_pipe7_mac_bridge_w160
+W160_DIR = obj_dir_w160
 # Item 6: Gen6 (Rate=5) wide raw datapath + PAM4, composed with the ctrl FSM.
 GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
 GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
@@ -193,7 +203,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_timeout verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -253,6 +263,24 @@ verilator_framing:
 		--top-module $(FRAMING_TOP) --Mdir $(FRAMING_DIR) -o framing_sim $(FRAMING_FILES)
 	@echo "Running Verilator framing smoke..."
 	./$(FRAMING_DIR)/framing_sim
+
+# Item 29: integrated bridge at width 160 -- validates the gearbox + burst-FIFO fold end-to-end.
+verilator_bridge_w160:
+	@echo "========== Verilator integrated bridge @ PIPE_WIDTH=160 (item 29) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator"; exit 1; fi
+	rm -rf $(W160_DIR)
+	$(VERILATOR) --binary --timing --assert -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(W160_TOP) --Mdir $(W160_DIR) -o w160_sim $(W160_FILES)
+	@echo "Running Verilator width-160 bridge smoke..."
+	./$(W160_DIR)/w160_sim
+
+# Item 29: RX burst-FIFO unit test -- 0/1/2-per-cycle push vs 1/cycle drain; order + overflow.
+verilator_burst:
+	@echo "========== Verilator RX burst-FIFO unit test (item 29) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator"; exit 1; fi
+	rm -rf $(BURST_DIR)
+	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(BURST_TOP) --Mdir $(BURST_DIR) -o burst_sim $(BURST_FILES)
+	@echo "Running Verilator burst-FIFO unit test..."
+	./$(BURST_DIR)/burst_sim
 
 # Item 28: completion-watchdog smoke -- ctrl FSM + msgbus master time out on a hung PHY, report
 # an error, and recover; the normal path still completes. --binary --timing; $fatal on fail.
@@ -530,7 +558,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(TIMEOUT_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
 	rm -f coverage.info
 	rm -f waves/*.vcd
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb

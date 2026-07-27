@@ -24,6 +24,7 @@ SRCS = ../../src/pipe7_pkg.sv \
        ../../src/pipe7_gen6_datapath.sv \
        ../../src/pipe7_mac_datapath.sv \
        ../../src/pipe7_mac_datapath_ra.sv \
+       ../../src/pipe7_rx_burst_fifo.sv \
        ../../src/pipe7_msgbus_master.sv \
        ../../src/pipe7_regfile.sv \
        ../../src/pipe7_rdi_ingress.sv \

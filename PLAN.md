@@ -419,6 +419,10 @@ green each commit, `Co-Authored-By` trailer, commit only when asked.
 
 **Tier 1 — correctness hazards (do first)**
 
+**Delivered:** 26 (RX overflow flag + SVA), 27 (deframer accumulator guard + formal + directed
+test), 28 (control/msgbus completion watchdogs), 29 (rate-aware datapath + gearbox→CDC burst
+absorption folded into the top; `pipe7_rx_burst_fifo`; validated at width 80 **and 160**).
+
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
     sink makes `dp_rx_valid` write a **full** `rx_cdc` and the block is silently dropped (today the
