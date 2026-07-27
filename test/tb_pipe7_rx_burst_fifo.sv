@@ -60,7 +60,7 @@ module tb_pipe7_rx_burst_fifo;
     int phase;
     initial begin
         next_val = 0; last_pop = -1; pops = 0; ovf_ph1 = 0; ovf_ph2 = 0; errors = 0; phase = 0;
-        push_cnt = 0; din0 = 0; din1 = 0; pop_ready = 0;
+        push_cnt = 0; pop_ready = 0;   // din0/din1 are continuously assigned from next_val
         reset_n = 0; repeat (3) @(negedge clk); reset_n = 1; @(negedge clk);
 
         // Phase 1: balanced 1-in / 1-out -> never overflows.
