@@ -22,14 +22,21 @@
  * Flow control (crosscheck G8): one outstanding transaction per master (enforced structurally
  * -- the FSM is single-transaction and holds `busy`); a committed write blocks until write_ack.
  *
- * Scope: control-plane message framing only. There is intentionally no response-timeout here
- * (the P2M max-latency timeout assertion is item 7); rsp_error is reserved for that item and
- * held low. A real design multiplexes several logical requesters ahead of this master; that
- * arbitration is added with the regfile write-through path in item 5+.
+ * Scope: control-plane message framing only. A real design multiplexes several logical
+ * requesters ahead of this master; that arbitration is added with the regfile write-through
+ * path in item 5+.
+ *
+ * Response watchdog (item 28): the write_ack / read_completion waits are bounded by
+ * TIMEOUT_CYCLES pclk cycles. A hung PHY no longer hangs the master -- on expiry the
+ * transaction completes with rsp_valid + rsp_error (the controller sees a failed access and
+ * may retry) and the FSM recovers to S_IDLE. TIMEOUT_CYCLES=0 disables the watchdog; the
+ * default (1024) never fires in normal operation (P2M completes in a few cycles).
  */
 module pipe7_msgbus_master
     import pipe7_pkg::*;
-(
+#(
+    parameter int TIMEOUT_CYCLES = 1024
+) (
     input  logic                      pclk,
     input  logic                      reset_n,        // PIPE Reset# (async, active-low)
 
@@ -81,6 +88,12 @@ module pipe7_msgbus_master
     assign req_ready = (state == S_IDLE);
     assign busy      = (state != S_IDLE);
 
+    // Response watchdog (item 28): count cycles spent awaiting a P2M completion.
+    localparam int WDW = (TIMEOUT_CYCLES < 2) ? 1 : $clog2(TIMEOUT_CYCLES + 1);
+    logic [WDW-1:0] wd_cnt;
+    wire in_wait    = (state == S_WACK_WAIT) || (state == S_RC_WAIT1);
+    wire wd_expired = (TIMEOUT_CYCLES != 0) && in_wait && (wd_cnt >= WDW'(TIMEOUT_CYCLES - 1));
+
     always_ff @(posedge pclk or negedge reset_n) begin
         if (!reset_n) begin
             state       <= S_IDLE;
@@ -93,10 +106,14 @@ module pipe7_msgbus_master
             rsp_is_read <= 1'b0;
             rsp_rdata   <= '0;
             rsp_error   <= 1'b0;
+            wd_cnt      <= '0;
         end else begin
             rsp_valid <= 1'b0;          // default-low 1-cycle pulse
-            rsp_error <= 1'b0;          // reserved; never asserted this item
+            rsp_error <= 1'b0;          // asserted only on a watchdog timeout (below)
             m2p       <= MB_IDLE;       // default idle unless a state drives a byte
+
+            // Watchdog counter: run while awaiting a P2M response, clear otherwise.
+            wd_cnt <= in_wait ? (wd_cnt + 1'b1) : '0;
 
             unique case (state)
                 S_IDLE: begin
@@ -136,12 +153,23 @@ module pipe7_msgbus_master
                         rsp_valid   <= 1'b1;
                         rsp_is_read <= 1'b0;
                         state       <= S_IDLE;
+                    end else if (wd_expired) begin
+                        rsp_valid   <= 1'b1;     // no write_ack: complete with error + recover
+                        rsp_is_read <= 1'b0;
+                        rsp_error   <= 1'b1;
+                        state       <= S_IDLE;
                     end
                 end
 
                 S_RC_WAIT1: begin
                     // read_completion start byte: {READ_COMPLETION, x}
                     if (p2m[7:4] == MB_READ_COMPLETION) state <= S_RC_WAIT2;
+                    else if (wd_expired) begin
+                        rsp_valid   <= 1'b1;     // no read_completion: complete with error + recover
+                        rsp_is_read <= 1'b1;
+                        rsp_error   <= 1'b1;
+                        state       <= S_IDLE;
+                    end
                 end
 
                 S_RC_WAIT2: begin

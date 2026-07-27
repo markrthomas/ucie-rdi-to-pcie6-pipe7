@@ -62,7 +62,11 @@ controller-side and arrive on RDI). Width/RxWidth ∈ {10,20,40,80,160}.
 
 A request FSM (`pipe7_mac_ctrl_fsm`) sequences PowerDown/Rate/Width changes toward the PHY and
 waits for the single-cycle `PhyStatus` completion. **L0p** is realized as an ordinary
-`Width`/`RxWidth` change — there is no dedicated L0p handshake. Non-latency-sensitive control
+`Width`/`RxWidth` change — there is no dedicated L0p handshake. Each `PhyStatus`/`PclkChangeOk`
+wait is bounded by a parameterized watchdog (`TIMEOUT_CYCLES`, default 1024): a hung PHY aborts
+the request with a `req_error` pulse and recovers to idle rather than hanging (item 28). The
+message-bus master carries the same watchdog on its `write_ack`/`read_completion` waits,
+completing a timed-out access with `rsp_valid` + `rsp_error`. Non-latency-sensitive control
 (Tx equalization presets/de-emphasis, `PAM4RestrictedLevels`, Rx margining) is programmed over
 the 8-bit message bus into the PHY register space; there is **no FEC register** on the PIPE
 interface.

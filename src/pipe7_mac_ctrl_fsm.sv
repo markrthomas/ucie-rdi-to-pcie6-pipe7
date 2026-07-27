@@ -17,13 +17,19 @@
  * PCLK-as-PHY-output (completion is a single PhyStatus pulse). Reset# is async active-low.
  *
  * Scope: control plane only. TxElecIdle is held asserted here (no data phase yet); the
- * datapath deasserts it in P0 data mode from item 5 onward. There is intentionally no
- * completion watchdog -- the PhyStatus max-latency timeout assertion is item 7.
+ * datapath deasserts it in P0 data mode from item 5 onward.
+ *
+ * Completion watchdog (item 28): each PhyStatus/PclkChangeOk wait is bounded by TIMEOUT_CYCLES
+ * pclk cycles. A hung PHY no longer hangs the FSM -- on expiry the request is aborted with a
+ * req_error pulse and the FSM recovers to S_IDLE (the applied command signals hold their last
+ * value; the controller may retry). TIMEOUT_CYCLES=0 disables the watchdog (unbounded wait).
+ * The default (1024) never fires in normal operation (PhyStatus completes in << 64 cycles).
  */
 module pipe7_mac_ctrl_fsm
     import pipe7_pkg::*;
 #(
-    parameter bit PCLK_IS_PHY_INPUT = 1'b0
+    parameter bit PCLK_IS_PHY_INPUT = 1'b0,
+    parameter int TIMEOUT_CYCLES    = 1024
 ) (
     input  logic        pclk,
     input  logic        reset_n,          // PIPE Reset# (async, active-low)
@@ -66,6 +72,12 @@ module pipe7_mac_ctrl_fsm
     logic [2:0] shadow_width;
     logic [2:0] shadow_rxw;
 
+    // Completion watchdog (item 28): count cycles spent waiting on the PHY.
+    localparam int WDW = (TIMEOUT_CYCLES < 2) ? 1 : $clog2(TIMEOUT_CYCLES + 1);
+    logic [WDW-1:0] wd_cnt;
+    wire in_wait    = (state == S_PWR_WAIT) || (state == S_RW_WAIT_OK) || (state == S_RW_APPLY_WAIT);
+    wire wd_expired = (TIMEOUT_CYCLES != 0) && in_wait && (wd_cnt >= WDW'(TIMEOUT_CYCLES - 1));
+
     // Rate/Width may be changed only in P0 or P1 (PIPE 7.1 §8.4.1). P0s (1) and P2 (3)
     // are illegal.
     function automatic logic rw_legal(input logic [3:0] pd);
@@ -88,9 +100,13 @@ module pipe7_mac_ctrl_fsm
             shadow_rate     <= RATE_GEN5;
             shadow_width    <= W_160;
             shadow_rxw      <= W_160;
+            wd_cnt          <= '0;
         end else begin
             done      <= 1'b0;            // default-low pulses
             req_error <= 1'b0;
+
+            // Watchdog counter: run while waiting on the PHY, clear otherwise.
+            wd_cnt <= in_wait ? (wd_cnt + 1'b1) : '0;
 
             unique case (state)
                 S_IDLE: begin
@@ -125,6 +141,10 @@ module pipe7_mac_ctrl_fsm
                         done  <= 1'b1;
                         busy  <= 1'b0;
                         state <= S_IDLE;
+                    end else if (wd_expired) begin
+                        req_error <= 1'b1;       // PHY never completed: abort + recover
+                        busy      <= 1'b0;
+                        state     <= S_IDLE;
                     end
                 end
 
@@ -141,6 +161,10 @@ module pipe7_mac_ctrl_fsm
                         // as an immediate ack once the PHY is ready.
                         pclk_change_ack <= 1'b1;
                         state           <= S_RW_APPLY_WAIT;
+                    end else if (wd_expired) begin
+                        req_error <= 1'b1;       // PHY never signalled ready: abort + recover
+                        busy      <= 1'b0;
+                        state     <= S_IDLE;
                     end
                 end
 
@@ -148,6 +172,11 @@ module pipe7_mac_ctrl_fsm
                     if (phy_status) begin
                         pclk_change_ack <= 1'b0;
                         done            <= 1'b1;
+                        busy            <= 1'b0;
+                        state           <= S_IDLE;
+                    end else if (wd_expired) begin
+                        pclk_change_ack <= 1'b0;
+                        req_error       <= 1'b1; // PHY never completed: abort + recover
                         busy            <= 1'b0;
                         state           <= S_IDLE;
                     end

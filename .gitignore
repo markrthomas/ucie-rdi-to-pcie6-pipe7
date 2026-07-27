@@ -7,6 +7,7 @@ obj_dir_msgbus/
 obj_dir_framing/
 obj_dir_framing_gb/
 obj_dir_deframer_ovf/
+obj_dir_timeout/
 obj_dir_rate_dp/
 obj_dir_rdi/
 obj_dir_cdc/
