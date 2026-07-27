@@ -6,7 +6,7 @@
 .PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
-        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
+        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
         verilator_msgbus verilator_nl1 vivado wave waves xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
@@ -53,6 +53,11 @@ FRAMING_GB_RTL = src/pipe7_pkg.sv src/pipe7_tx_framer_gb.sv src/pipe7_rx_deframe
 FRAMING_GB_FILES = $(FRAMING_GB_RTL) test/tb_pipe7_framing_gb.sv
 FRAMING_GB_TOP = tb_pipe7_framing_gb
 FRAMING_GB_DIR = obj_dir_framing_gb
+# Item 27: RX deframer accumulator overflow guard -- directed garbage + recovery.
+DEFRAMER_OVF_RTL = src/pipe7_pkg.sv src/pipe7_rx_deframer.sv
+DEFRAMER_OVF_FILES = $(DEFRAMER_OVF_RTL) test/tb_pipe7_deframer_ovf.sv
+DEFRAMER_OVF_TOP = tb_pipe7_deframer_ovf
+DEFRAMER_OVF_DIR = obj_dir_deframer_ovf
 # Item 6: Gen6 (Rate=5) wide raw datapath + PAM4, composed with the ctrl FSM.
 GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
 GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
@@ -183,7 +188,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -243,6 +248,18 @@ verilator_framing:
 		--top-module $(FRAMING_TOP) --Mdir $(FRAMING_DIR) -o framing_sim $(FRAMING_FILES)
 	@echo "Running Verilator framing smoke..."
 	./$(FRAMING_DIR)/framing_sim
+
+# Item 27: RX deframer overflow-guard smoke -- sustained garbage stays bounded (rfill <= RACC_W,
+# no spurious payload), then an aligned stream re-locks and recovers. --binary --timing; $fatal.
+verilator_deframer_ovf:
+	@echo "========== Verilator deframer overflow-guard smoke (item 27) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
+	rm -rf $(DEFRAMER_OVF_DIR)
+	$(VERILATOR) --binary --timing -Isrc \
+		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
+		--top-module $(DEFRAMER_OVF_TOP) --Mdir $(DEFRAMER_OVF_DIR) -o deframer_ovf_sim $(DEFRAMER_OVF_FILES)
+	@echo "Running Verilator deframer overflow-guard smoke..."
+	./$(DEFRAMER_OVF_DIR)/deframer_ovf_sim
 
 # Item 16: full-width gearbox framing smoke -- framer_gb -> deframer_gb at W160 (2 blocks/PCLK)
 # and W80. Self-clocking TB via --binary --timing; $fatal on mismatch.
@@ -496,7 +513,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
 	rm -f coverage.info
 	rm -f waves/*.vcd
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb

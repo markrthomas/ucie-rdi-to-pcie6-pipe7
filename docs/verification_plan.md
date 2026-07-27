@@ -126,8 +126,11 @@ package-import module headers). Skips cleanly if `sby` is absent.
 | `credit_fc` | `pipe7_rdi_egress` | no underflow, no over-credit (`credits ≤ CREDITS`), `credits+outstanding == CREDITS` |
 | `gearbox` | `pipe7_tx_framer_gb` | `pl_acc ≤ pl_cnt`, `≤ 2`, `≤ room`; accumulator never overflows |
 | `dataphase` | `pipe7_mac_datapath_ra` | `TxElecIdle` gating, rate-mux exclusivity (no Gen5+Gen6 overlap), data-phase-only-from-P0 |
+| `deframer` | `pipe7_rx_deframer` | accumulator fill bounded `[0, RACC_W]` unconditionally (the item-27 flush guard) |
 
-All four PASS (BMC + cover).
+All five PASS (BMC + cover). The RTL guard is additionally exercised directly by the
+`verilator_deframer_ovf` smoke (sustained garbage stays bounded + no spurious payload, then an
+aligned stream re-locks and recovers).
 
 ## Exit criteria (per commit)
 

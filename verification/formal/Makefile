@@ -8,8 +8,9 @@ SBY ?= sby
 #   credit_fc   — RDI egress credit flow control: no underflow / over-credit (item 18)
 #   gearbox     — Gen5 128b/130b TX gearbox: no over-accept / accumulator overflow (item 16)
 #   dataphase   — rate-aware datapath control: TxElecIdle gating + rate-mux safety (item 17)
+#   deframer    — Gen5 RX deframer accumulator overflow guard: fill bounded unconditionally (item 27)
 
-PROOFS = fifo_cdc credit_fc gearbox dataphase
+PROOFS = fifo_cdc credit_fc gearbox dataphase deframer
 
 .PHONY: all bmc cover clean $(PROOFS)
 
@@ -29,4 +30,5 @@ $(PROOFS):
 
 clean:
 	rm -rf fifo_cdc_bmc/ fifo_cdc_cover/ credit_fc_bmc/ credit_fc_cover/ \
-	       gearbox_bmc/ gearbox_cover/ dataphase_bmc/ dataphase_cover/
+	       gearbox_bmc/ gearbox_cover/ dataphase_bmc/ dataphase_cover/ \
+	       deframer_bmc/ deframer_cover/

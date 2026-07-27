@@ -51,11 +51,22 @@ module pipe7_rx_deframer
     logic [RACC_W-1:0] base_acc, n_racc;
     int                base_fill, n_rfill;
     logic [1:0]        sync_cand;
-    logic              legal;
+    logic              legal, n_locked, flush;
 
     always_comb begin
+        // Overflow guard: a persistently misaligned/noisy RX stream (never a legal header) would
+        // otherwise grow the accumulator without bound -- each cycle appends PIPE_WIDTH bits but a
+        // slip frees only one. If appending this word would exceed the accumulator, flush and
+        // re-hunt from empty (dropping the stale bits) and flag sync_error, rather than silently
+        // truncating racc / corrupting alignment. Unreachable on an aligned stream (rfill stays
+        // < BLOCK_BITS), so it never fires on legal data.
+        flush = (rfill + PIPE_WIDTH) > RACC_W;
+
         // Append this cycle's word (if valid) at the top of the accumulator.
-        if (rx_valid) begin
+        if (flush) begin
+            base_acc  = '0;
+            base_fill = 0;
+        end else if (rx_valid) begin
             base_acc  = racc | (rx_ext << rfill);
             base_fill = rfill + PIPE_WIDTH;
         end else begin
@@ -69,21 +80,24 @@ module pipe7_rx_deframer
         pl_valid   = 1'b0;
         pl_data    = base_acc[BLOCK_BITS-1:2];
         pl_is_os   = (sync_cand == SYNC_HDR_OS);
-        sync_error = 1'b0;
+        sync_error = flush ? block_locked : 1'b0;   // overflow flushes a lost lock
+        n_locked   = flush ? 1'b0 : block_locked;
         n_racc     = base_acc;
         n_rfill    = base_fill;
 
-        if (base_fill >= BLOCK_BITS) begin
+        if (!flush && base_fill >= BLOCK_BITS) begin
             if (legal) begin
                 // Aligned block: emit payload and consume the whole 130-bit block.
                 pl_valid = 1'b1;
                 n_racc   = base_acc >> BLOCK_BITS;
                 n_rfill  = base_fill - BLOCK_BITS;
+                n_locked = 1'b1;
             end else begin
                 // Not aligned: slip one bit and re-hunt.
                 sync_error = block_locked;   // only flag a lost lock, not the initial hunt
                 n_racc     = base_acc >> 1;
                 n_rfill    = base_fill - 1;
+                n_locked   = 1'b0;
             end
         end
     end
@@ -94,10 +108,9 @@ module pipe7_rx_deframer
             rfill        <= 0;
             block_locked <= 1'b0;
         end else begin
-            racc  <= n_racc;
-            rfill <= n_rfill;
-            if (base_fill >= BLOCK_BITS)
-                block_locked <= legal;   // set on a good header, cleared on a slip
+            racc         <= n_racc;
+            rfill        <= n_rfill;
+            block_locked <= n_locked;
         end
     end
 

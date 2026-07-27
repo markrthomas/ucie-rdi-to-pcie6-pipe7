@@ -11,3 +11,6 @@ gearbox_cover/
 dataphase/
 dataphase_bmc/
 dataphase_cover/
+deframer/
+deframer_bmc/
+deframer_cover/

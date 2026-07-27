@@ -1,0 +1,28 @@
+# deframer.sby — SymbiYosys proof for the Gen5 RX deframer accumulator overflow guard (item 27).
+#
+#   bmc   — safety: the accumulator fill is bounded [0, RACC_W] unconditionally (guard holds)
+#   cover — reachability: the flush guard fires, and a normal extraction occurs
+
+[tasks]
+bmc
+cover
+
+[options]
+bmc:   mode bmc
+cover: mode cover
+depth 30
+
+[engines]
+smtbmc
+
+[script]
+read -define FORMAL
+read -sv deframer_props.sv
+hierarchy -top deframer_props
+proc
+opt
+flatten
+opt
+
+[files]
+deframer_props.sv

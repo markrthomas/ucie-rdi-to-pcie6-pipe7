@@ -45,12 +45,20 @@ module pipe7_rx_deframer_gb
     logic [RACC_W-1:0] a_base, a_cur, n_racc;
     int                f_base, f_cur, n_rfill;
     logic [1:0]        s0, s1;
-    logic              n_locked;
+    logic              n_locked, flush;
 
     always_comb begin
-        // Append this cycle's word (if valid).
-        if (rx_valid) begin a_base = racc | (rx_ext << rfill); f_base = rfill + PIPE_WIDTH; end
-        else          begin a_base = racc;                     f_base = rfill;             end
+        // Overflow guard: a persistently misaligned/noisy RX stream would otherwise grow the
+        // accumulator without bound (append PIPE_WIDTH, slip only one bit). If appending this word
+        // would exceed the accumulator, flush and re-hunt from empty and flag sync_error, rather
+        // than silently truncating racc. Unreachable on an aligned stream (up to two blocks are
+        // drained per cycle), so it never fires on legal data.
+        flush = (rfill + PIPE_WIDTH) > RACC_W;
+
+        // Append this cycle's word (if valid), unless flushing.
+        if (flush)          begin a_base = '0;                        f_base = 0;                  end
+        else if (rx_valid)  begin a_base = racc | (rx_ext << rfill);  f_base = rfill + PIPE_WIDTH; end
+        else                begin a_base = racc;                      f_base = rfill;             end
 
         // Defaults for every comb-assigned signal (no inferred latches).
         pl_cnt     = 2'd0;
@@ -58,8 +66,8 @@ module pipe7_rx_deframer_gb
         pl_is_os0  = 1'b0;
         pl_data1   = '0;
         pl_is_os1  = 1'b0;
-        sync_error = 1'b0;
-        n_locked   = block_locked;
+        sync_error = flush ? block_locked : 1'b0;
+        n_locked   = flush ? 1'b0 : block_locked;
         s0         = 2'b00;
         s1         = 2'b00;
         a_cur      = a_base;
