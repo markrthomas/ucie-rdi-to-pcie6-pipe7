@@ -18,3 +18,4 @@ deframer_rtl/
 ingress_fc/
 ingress_fc_bmc/
 ingress_fc_cover/
+cdc_mc/

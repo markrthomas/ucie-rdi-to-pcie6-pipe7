@@ -32,6 +32,20 @@ crosses RDI↔PCLK with pointer-only synchronization (no combinational data path
 | `pipe7_msgbus_master` + `pipe7_regfile` | 8-bit M2P/P2M message-bus master (read = 2 cyc, write = 3 cyc; read_completion / write_ack) + MAC-side register file. |
 | `ucie_rdi_to_pipe7_mac_bridge` | **Integrated top** (item 20): RDI ingress/egress (+credits) → RDI↔PCLK CDC → Gen5 128b/130b datapath (`TxElecIdle`-gated) → PIPE MAC, alongside the control FSM and the message-bus master/regfile. Dual-clock (`rdi_clk` + `pclk`). |
 
+## Clock-domain crossing & reset
+
+The RDI (`rdi_clk`) and PIPE (`pclk`) domains are bridged by `pipe7_cdc_elastic_buf` (Gray-coded
+pointers + 2-flop synchronizers). The dual-clock crossing is proven safe under **independent**
+clocks by the multiclock formal proof (`verification/formal/cdc_mc.sby`, on the real RTL via
+yosys-slang): physical occupancy `wr_ptr − rd_ptr` stays in `[0, BUFFER_DEPTH]` (writes are gated
+by `wr_full`, computed from the conservative *lagging* synchronized read pointer). CDC timing
+intent is captured in `constraints/pipe7_cdc_elastic_buf.sdc` (asynchronous clock groups +
+`set_max_delay -datapath_only` on the Gray crossings).
+
+**Reset:** `rst_n` is async and fans into both domains. Assertion is async-safe; deassertion must
+be recovery/removal-clean **per domain** — a deployment feeds `rst_n` through a per-domain reset
+synchronizer (async-assert, sync-deassert). The SDC notes where to cut the raw reset crossing.
+
 ## Datapath
 
 ```

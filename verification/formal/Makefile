@@ -1,10 +1,11 @@
 SBY ?= sby
 
-# SymbiYosys formal proofs (ported CDC + closure-plan item 24). Each proof is a faithful
-# plain-Verilog model of the corresponding RTL core (Yosys's Verilog frontend cannot parse the
-# SV package-import module headers), running BMC (safety) + cover (reachability).
+# SymbiYosys formal proofs. Most are faithful plain-Verilog re-models of the RTL core (Yosys's
+# built-in Verilog frontend cannot parse the SV package-import module headers); cdc_mc and
+# deframer_rtl bind the REAL RTL via the yosys-slang frontend. BMC (safety) + cover (reachability).
 #
-#   fifo_cdc    — CDC elastic buffer: no overflow/underflow, flag consistency (ported)
+#   fifo_cdc    — CDC elastic buffer: no overflow/underflow, flag consistency (ported, single-clock)
+#   cdc_mc      — REAL CDC under INDEPENDENT clocks (multiclock, via slang): occupancy bounded (item 32)
 #   credit_fc   — RDI egress credit flow control: no underflow / over-credit (item 18)
 #   ingress_fc  — RDI ingress credit flow control: no FIFO overflow under a credit-honest sender (item 33)
 #   gearbox     — Gen5 128b/130b TX gearbox: no over-accept / accumulator overflow (item 16)
@@ -12,7 +13,7 @@ SBY ?= sby
 #   deframer    — Gen5 RX deframer accumulator overflow guard: fill bounded unconditionally (item 27)
 #   deframer_rtl — SAME guard bound to the REAL pipe7_rx_deframer via yosys-slang (item 31)
 
-PROOFS = fifo_cdc credit_fc ingress_fc gearbox dataphase deframer deframer_rtl
+PROOFS = fifo_cdc cdc_mc credit_fc ingress_fc gearbox dataphase deframer deframer_rtl
 
 .PHONY: all bmc cover clean $(PROOFS)
 
@@ -31,6 +32,6 @@ $(PROOFS):
 	$(SBY) -f $@.sby
 
 clean:
-	rm -rf fifo_cdc_bmc/ fifo_cdc_cover/ credit_fc_bmc/ credit_fc_cover/ ingress_fc_bmc/ ingress_fc_cover/ \
+	rm -rf fifo_cdc_bmc/ fifo_cdc_cover/ cdc_mc/ credit_fc_bmc/ credit_fc_cover/ ingress_fc_bmc/ ingress_fc_cover/ \
 	       gearbox_bmc/ gearbox_cover/ dataphase_bmc/ dataphase_cover/ \
 	       deframer_bmc/ deframer_cover/ deframer_rtl/

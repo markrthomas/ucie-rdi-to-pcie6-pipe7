@@ -425,7 +425,7 @@ absorption folded into the top; `pipe7_rx_burst_fifo`; validated at width 80 **a
 30 (PAM4RestrictedLevels write-through to the Gen6 datapath; PIPE_WIDTH compile-parameterized,
 validated at 80/160 — **runtime** sub-width lane selection deferred as a datapath refinement),
 31 (real-RTL formal via yosys-slang: `deframer_rtl` binds the item-27 guard proof to the shipped
-`pipe7_rx_deframer.sv`; the slang flow is established for re-targeting the rest). 33 (RDI ingress credit FC no-overflow proof).
+`pipe7_rx_deframer.sv`; the slang flow is established for re-targeting the rest). 33 (RDI ingress credit FC no-overflow proof). 32 (true dual-clock CDC multiclock formal on the real RTL via slang + CDC/reset-sync SDC constraints).
 
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI

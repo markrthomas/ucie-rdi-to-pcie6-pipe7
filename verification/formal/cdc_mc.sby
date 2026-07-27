@@ -1,0 +1,22 @@
+# cdc_mc.sby -- MULTICLOCK SymbiYosys proof for the real pipe7_cdc_elastic_buf (item 32).
+# Drives wr_clk and rd_clk as independent clocks (multiclock on) so the dual-clock Gray-pointer
+# crossing is exercised with arbitrary interleavings -- the true dual-clock safety proof, unlike
+# the single-clock fifo_cdc abstraction. Parsed from the real RTL via yosys-slang.
+
+[options]
+mode bmc
+depth 20
+multiclock on
+
+[engines]
+smtbmc
+
+[script]
+plugin -i slang
+read_slang --top cdc_mc_props cdc_mc_props.sv pipe7_pkg.sv pipe7_cdc_elastic_buf.sv
+prep -flatten -top cdc_mc_props
+
+[files]
+cdc_mc_props.sv
+../../src/pipe7_pkg.sv
+../../src/pipe7_cdc_elastic_buf.sv
