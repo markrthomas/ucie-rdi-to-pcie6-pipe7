@@ -1,0 +1,28 @@
+# ingress_fc.sby -- SymbiYosys proof for the RDI ingress credit flow control (item 33).
+#
+#   bmc   -- safety: no FIFO overflow, sender budget bounded, closed-loop invariant
+#   cover -- reachability: FIFO fills to CREDITS / sender exhausts its credits
+
+[tasks]
+bmc
+cover
+
+[options]
+bmc:   mode bmc
+cover: mode cover
+depth 40
+
+[engines]
+smtbmc
+
+[script]
+read -define FORMAL
+read -sv ingress_fc_props.sv
+hierarchy -top ingress_fc_props
+proc
+opt
+flatten
+opt
+
+[files]
+ingress_fc_props.sv

@@ -116,20 +116,22 @@ via `make lint`.
 
 ## Formal
 
-`make formal` (SymbiYosys) runs four BMC + cover proofs in `verification/formal/`; each is a
-faithful plain-Verilog model of the RTL core (Yosys's Verilog frontend cannot parse the SV
-package-import module headers). Skips cleanly if `sby` is absent.
+`make formal` (SymbiYosys) runs seven BMC + cover proofs in `verification/formal/`. Most are
+faithful plain-Verilog re-models of the RTL core (Yosys's built-in Verilog frontend cannot parse
+the SV package-import module headers); `deframer_rtl` binds to the shipped RTL via the yosys-slang
+frontend (item 31). Skips cleanly if `sby` is absent.
 
 | Proof | Core | Properties |
 |-------|------|------------|
 | `fifo_cdc` | `pipe7_cdc_elastic_buf` | no overflow/underflow, flag consistency, output stability (ported) |
 | `credit_fc` | `pipe7_rdi_egress` | no underflow, no over-credit (`credits ≤ CREDITS`), `credits+outstanding == CREDITS` |
+| `ingress_fc` | `pipe7_rdi_ingress` | no FIFO overflow (`count ≤ CREDITS`) under a credit-honest sender; closed loop (item 33) |
 | `gearbox` | `pipe7_tx_framer_gb` | `pl_acc ≤ pl_cnt`, `≤ 2`, `≤ room`; accumulator never overflows |
 | `dataphase` | `pipe7_mac_datapath_ra` | `TxElecIdle` gating, rate-mux exclusivity (no Gen5+Gen6 overlap), data-phase-only-from-P0 |
 | `deframer` | `pipe7_rx_deframer` (re-model) | accumulator fill bounded `[0, RACC_W]` unconditionally (the item-27 flush guard) |
 | `deframer_rtl` | **real** `pipe7_rx_deframer` | the same bound, proven on the shipped RTL via the yosys-slang frontend (item 31) |
 
-All six PASS (BMC + cover). The RTL guard is additionally exercised directly by the
+All seven PASS (BMC + cover). The RTL guard is additionally exercised directly by the
 `verilator_deframer_ovf` smoke (sustained garbage stays bounded + no spurious payload, then an
 aligned stream re-locks and recovers).
 
