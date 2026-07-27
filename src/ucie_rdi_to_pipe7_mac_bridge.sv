@@ -122,16 +122,24 @@ module ucie_rdi_to_pipe7_mac_bridge
         .rsp_error(mb_rsp_error),
         .m2p(m2p_message_bus), .p2m(p2m_message_bus)
     );
+    // Committed register writes are written through into the MAC-side register file, so the MAC
+    // holds the programmed PHY Tx Control values (item 35: this replaces the tied-off placeholder
+    // regfile and the separate item-30 PAM4 latch). The regfile's host_hit gates in-window writes.
+    wire mb_accept = mb_req_valid && mb_req_ready;
+    wire mb_wr     = mb_accept && mb_req_write;
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [MB_DATA_WIDTH-1:0] rf_rdata_nc;
-    logic                     rf_hit_nc;
-    logic [8*MB_DATA_WIDTH-1:0] rf_snap_nc;
+    logic [MB_DATA_WIDTH-1:0]   rf_rdata_nc;  // host read port unused here (write-through only)
+    logic                       rf_hit_nc;
+    logic [8*MB_DATA_WIDTH-1:0] rf_snap;       // full register snapshot; only PAM4 feeds the datapath
     /* verilator lint_on UNUSEDSIGNAL */
     pipe7_regfile #(.NUM_REGS(8), .BASE_ADDR(REG_PHY_TX_CTRL_BASE)) rf (
         .pclk, .reset_n(rst_n),
-        .host_we(1'b0), .host_re(1'b0), .host_addr('0), .host_wdata('0),
-        .host_rdata(rf_rdata_nc), .host_hit(rf_hit_nc), .regs_flat(rf_snap_nc)
+        .host_we(mb_wr), .host_re(1'b0), .host_addr(mb_req_addr), .host_wdata(mb_req_wdata),
+        .host_rdata(rf_rdata_nc), .host_hit(rf_hit_nc), .regs_flat(rf_snap)
     );
+    // The MAC's PAM4 knob is the PAM4RestrictedLevels register in the file (item 30).
+    localparam int PAM4_IDX = int'(REG_PHY_PAM4_RESTRICTED_LEVELS) - int'(REG_PHY_TX_CTRL_BASE);
+    wire [MB_DATA_WIDTH-1:0] pam4_levels = rf_snap[PAM4_IDX*MB_DATA_WIDTH +: MB_DATA_WIDTH];
 
     // ================= TX: RDI ingress -> CDC -> datapath =================
     logic          ig_blk_valid, ig_blk_is_os, ig_blk_ready;
@@ -164,18 +172,6 @@ module ucie_rdi_to_pipe7_mac_bridge
     logic [1:0]    g5_pl_acc;
     wire [1:0]     g5_pl_cnt   = txc_rd_valid ? 2'd1 : 2'd0;   // offer one block when buffered
     assign txc_rd_ready = |g5_pl_acc;                   // consume the CDC word when the framer took it
-
-    // ---- PAM4 config (item 30): the controller programs PAM4RestrictedLevels over the message
-    // bus toward the PHY; the bridge write-throughs the same committed write into a MAC-side
-    // register that drives the Gen6 datapath's PAM4 config (the MAC's only PAM4 knob). ----
-    logic [MB_DATA_WIDTH-1:0] pam4_levels;
-    wire mb_accept = mb_req_valid && mb_req_ready;
-    always_ff @(posedge pclk or negedge rst_n) begin
-        if (!rst_n)
-            pam4_levels <= '0;
-        else if (mb_accept && mb_req_write && (mb_req_addr == REG_PHY_PAM4_RESTRICTED_LEVELS))
-            pam4_levels <= mb_req_wdata;
-    end
 
     // ---- Rate-aware datapath (item 29): Gen5 128b/130b full-width gearbox + Gen6 raw, muxed by
     // Rate, TxElecIdle owned by its data-phase FSM. Gen6 TX is not driven from the top yet. ----
@@ -222,10 +218,11 @@ module ucie_rdi_to_pipe7_mac_bridge
 
     logic          rxb_valid, rxb_overflow;
     logic [PW-1:0] rxb_data;
-    logic          rxc_rd_valid, rxc_rd_ready, rxc_wr_full, rxc_wr_ready;
+    logic          rxc_rd_valid, rxc_rd_ready, rxc_wr_ready;
     logic [PW-1:0] rxc_rd_data;
     /* verilator lint_off UNUSEDSIGNAL */
-    logic          rxc_rd_error;
+    logic          rxc_wr_full;    // redundant with wr_ready (=!full); the FIFO gates on wr_ready
+    logic          rxc_rd_error;   // CDC rd_error unused (the payload path carries no error bit)
     /* verilator lint_on UNUSEDSIGNAL */
 
     pipe7_rx_burst_fifo #(.WIDTH(PW), .DEPTH(4)) rx_burst (
@@ -241,9 +238,6 @@ module ucie_rdi_to_pipe7_mac_bridge
         .wr_data(rxb_data), .wr_error(1'b0), .wr_full(rxc_wr_full),
         .rd_valid(rxc_rd_valid), .rd_ready(rxc_rd_ready), .rd_data(rxc_rd_data), .rd_error(rxc_rd_error)
     );
-    /* verilator lint_off UNUSEDSIGNAL */
-    wire _unused_rxc_wr_full = rxc_wr_full;
-    /* verilator lint_on UNUSEDSIGNAL */
 
     pipe7_rdi_egress #(.RDI_WIDTH(RDI_WIDTH), .CREDITS(CREDITS)) egress (
         .clk(rdi_clk), .reset_n(rst_n),
