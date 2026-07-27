@@ -105,7 +105,7 @@ via `make lint`.
 
 - **Line coverage** (`make regress_cov` → `coverage.info`; `make coverage_summary`): the
   instrumented flow now covers the **integrated-bridge end-to-end smoke**
-  (`tb_pipe7_mac_bridge`) — current baseline **~89% line** (643/723), up from the item-1
+  (`tb_pipe7_mac_bridge`) — current baseline **~85% line** (759/891), up from the item-1
   datapath baseline (135/158). Remaining uncovered lines are error/edge branches (e.g. RX
   elastic-buffer overflow, message-bus error responses) exercised by the per-block self-checking
   Verilator smokes, the PyUVM cross-checks, and the authored UVM env rather than the single

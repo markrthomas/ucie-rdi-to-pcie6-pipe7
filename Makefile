@@ -524,7 +524,7 @@ docs_check:
 	@grep -q "pipe7_mac_pkg" docs/uvm_verification.md || { echo "docs_check: uvm_verification.md must describe pipe7_mac_pkg"; exit 1; }
 	@grep -qi "coverage" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the coverage baseline"; exit 1; }
 	@# Item 25 sign-off: the docs must describe the INTEGRATED IP + all-tier verification.
-	@grep -q "643/723" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the integrated coverage baseline (643/723)"; exit 1; }
+	@grep -q "759/891" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the integrated coverage baseline (759/891)"; exit 1; }
 	@grep -qi "integrated" docs/architecture.md || { echo "docs_check: architecture.md must describe the integrated bridge top"; exit 1; }
 	@grep -qi "credit_fc\|gearbox\|dataphase" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the formal proofs"; exit 1; }
 	@grep -q "pipe7_rdi_ingress\|pipe7_rdi_egress" docs/architecture.md || { echo "docs_check: architecture.md must describe the credit-based RDI front end"; exit 1; }

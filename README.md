@@ -32,13 +32,15 @@ Two-tier, mirroring the predecessor's methodology:
   smoke (RDI round-trip + control + message bus, assertions bound) plus per-block self-checking
   smokes (control FSM, message bus, Gen5 framing + full-width gearbox, Gen6 datapath, rate-aware
   datapath, RDI credit FC, CDC, protocol SVA), a reduced-config param smoke, and line coverage
-  (`make regress_cov`; baseline **~89% line (643/723)** on the integrated bridge).
+  (`make regress_cov`; baseline **~85% line (759/891)** on the integrated bridge).
 - **PyUVM-on-Cocotb** — runnable cross-check (`make cocotb`, a required CI gate): independent
   Python models cross-check the datapath, control plane, and message bus, **plus the integrated
   bridge end-to-end** (`test_bridge.py`, 3-way) and a **Gen6-wide RX** check (`test_gen6_rx.py`).
-- **Formal (SymbiYosys)** — `make formal`: four BMC + cover proofs — CDC-buffer invariants, RDI
-  credit-FC (no underflow / over-credit), the Gen5 gearbox accept/accumulator bounds, and the
-  rate-aware datapath control (TxElecIdle gating, rate-mux exclusivity, data-phase-only-from-P0).
+- **Formal (SymbiYosys)** — `make formal`: eight BMC + cover proofs — CDC-buffer invariants
+  (single-clock + a true **dual-clock multiclock** proof on the real RTL), RDI credit-FC on both
+  the egress and ingress sides, the Gen5 gearbox accept/accumulator bounds, the rate-aware datapath
+  control (TxElecIdle gating, rate-mux exclusivity, data-phase-only-from-P0), and the RX deframer
+  overflow guard (re-model **and** bound to the shipped RTL via the yosys-slang frontend).
 - **UVM (VCS/UVM 1.2)** — authored-and-review-validated growth path (`make uvm`), retargeted at
   the integrated bridge (credit/flit RDI, dual-clock) with a **Gen6-wide RX** agent + mirrored-
   queue scoreboard, alongside the control/message-bus agents, PHY-responder BFM, and covergroups.

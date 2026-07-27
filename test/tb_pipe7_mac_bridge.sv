@@ -153,6 +153,20 @@ module tb_pipe7_mac_bridge;
         if (!done) begin errors = errors + 1; $display("[BRIDGE] FAIL: ctrl no completion"); end
     endtask
 
+    // Issue a control request that must be REJECTED (req_error, no done) -- exercises the FSM's
+    // illegal-request path (item 34: cover the Rate/Width-not-in-P0/P1 reject branch).
+    task automatic do_ctrl_reject(input logic [1:0] k, input logic [3:0] pd, input logic [3:0] rt);
+        int w;
+        @(negedge pclk);
+        req_kind = k; req_power_down = pd; req_rate = rt; req_width = W_80; req_rxwidth = W_80;
+        req_valid = 1'b1;
+        @(negedge pclk); req_valid = 1'b0;
+        w = 0; while (!done && !req_error) begin w++; if (w > 50) break; @(negedge pclk); end
+        if (!req_error || done) begin
+            errors = errors + 1; $display("[BRIDGE] FAIL: illegal ctrl not rejected (done=%0b err=%0b)", done, req_error);
+        end
+    endtask
+
     task automatic do_mb(input logic wr, input logic com, input logic [MB_ADDR_WIDTH-1:0] a,
                          input logic [MB_DATA_WIDTH-1:0] d);
         int w;
@@ -196,6 +210,15 @@ module tb_pipe7_mac_bridge;
         do_ctrl(REQ_RATE, PD_P0, RATE_GEN6);
         if (rate !== RATE_GEN6) begin errors = errors + 1; $display("[BRIDGE] FAIL: rate != Gen6"); end
         do_ctrl(REQ_RATE, PD_P0, RATE_GEN5);
+
+        // Item 34: error paths -- illegal Rate/Width changes outside P0/P1 must be rejected.
+        do_ctrl(REQ_POWER, PD_P2, RATE_GEN5);                 // enter P2
+        do_ctrl_reject(REQ_RATE,  PD_P2, RATE_GEN6);          // rate change illegal in P2 -> reject
+        do_ctrl_reject(REQ_WIDTH, PD_P2, RATE_GEN5);          // width change illegal in P2 -> reject
+        do_ctrl(REQ_POWER, PD_P0, RATE_GEN5);                 // back to P0
+        if (rate !== RATE_GEN5 || power_down !== PD_P0) begin
+            errors = errors + 1; $display("[BRIDGE] FAIL: state after reject rate=%0h pd=%0h", rate, power_down);
+        end
 
         repeat (10) @(negedge pclk);
 
