@@ -9,8 +9,9 @@ SBY ?= sby
 #   gearbox     — Gen5 128b/130b TX gearbox: no over-accept / accumulator overflow (item 16)
 #   dataphase   — rate-aware datapath control: TxElecIdle gating + rate-mux safety (item 17)
 #   deframer    — Gen5 RX deframer accumulator overflow guard: fill bounded unconditionally (item 27)
+#   deframer_rtl — SAME guard bound to the REAL pipe7_rx_deframer via yosys-slang (item 31)
 
-PROOFS = fifo_cdc credit_fc gearbox dataphase deframer
+PROOFS = fifo_cdc credit_fc gearbox dataphase deframer deframer_rtl
 
 .PHONY: all bmc cover clean $(PROOFS)
 

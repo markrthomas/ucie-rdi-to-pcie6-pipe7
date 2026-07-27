@@ -126,11 +126,21 @@ package-import module headers). Skips cleanly if `sby` is absent.
 | `credit_fc` | `pipe7_rdi_egress` | no underflow, no over-credit (`credits ≤ CREDITS`), `credits+outstanding == CREDITS` |
 | `gearbox` | `pipe7_tx_framer_gb` | `pl_acc ≤ pl_cnt`, `≤ 2`, `≤ room`; accumulator never overflows |
 | `dataphase` | `pipe7_mac_datapath_ra` | `TxElecIdle` gating, rate-mux exclusivity (no Gen5+Gen6 overlap), data-phase-only-from-P0 |
-| `deframer` | `pipe7_rx_deframer` | accumulator fill bounded `[0, RACC_W]` unconditionally (the item-27 flush guard) |
+| `deframer` | `pipe7_rx_deframer` (re-model) | accumulator fill bounded `[0, RACC_W]` unconditionally (the item-27 flush guard) |
+| `deframer_rtl` | **real** `pipe7_rx_deframer` | the same bound, proven on the shipped RTL via the yosys-slang frontend (item 31) |
 
-All five PASS (BMC + cover). The RTL guard is additionally exercised directly by the
+All six PASS (BMC + cover). The RTL guard is additionally exercised directly by the
 `verilator_deframer_ovf` smoke (sustained garbage stays bounded + no spurious payload, then an
 aligned stream re-locks and recovers).
+
+**Real-RTL formal (item 31).** The `fifo_cdc` / `credit_fc` / `gearbox` / `dataphase` / `deframer`
+proofs are faithful plain-Verilog re-models (Yosys's built-in Verilog frontend cannot parse the
+SV package-import module headers). The **yosys-slang** plugin (`plugin -i slang; read_slang`)
+*can* parse the real modules, so `deframer_rtl` binds the item-27 guard proof to the shipped
+`pipe7_rx_deframer.sv` directly. yosys-slang supports immediate assertions (not concurrent SVA),
+and modules whose combinational logic is written in `int` (e.g. the gearbox `offered`/`take`)
+still translate more reliably as the `reg`-typed re-models — so those keep their re-model proofs
+for now.
 
 ## Exit criteria (per commit)
 

@@ -423,7 +423,9 @@ green each commit, `Co-Authored-By` trailer, commit only when asked.
 test), 28 (control/msgbus completion watchdogs), 29 (rate-aware datapath + gearbox→CDC burst
 absorption folded into the top; `pipe7_rx_burst_fifo`; validated at width 80 **and 160**),
 30 (PAM4RestrictedLevels write-through to the Gen6 datapath; PIPE_WIDTH compile-parameterized,
-validated at 80/160 — **runtime** sub-width lane selection deferred as a datapath refinement).
+validated at 80/160 — **runtime** sub-width lane selection deferred as a datapath refinement),
+31 (real-RTL formal via yosys-slang: `deframer_rtl` binds the item-27 guard proof to the shipped
+`pipe7_rx_deframer.sv`; the slang flow is established for re-targeting the rest).
 
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
@@ -460,9 +462,13 @@ validated at 80/160 — **runtime** sub-width lane selection deferred as a datap
 
 **Tier 3 — verification fidelity**
 
-31. **Formal on the real RTL.** Add an SV frontend (`sv2v`, or Yosys + `slang`/synlig) so the
-    proofs bind to the actual modules instead of the hand-translated plain-Verilog re-models (which
-    can drift) — or add model↔RTL equivalence checking. Re-target the item-24 proofs.
+31. **Formal on the real RTL (delivered).** The **yosys-slang** plugin (`plugin -i slang;
+    read_slang`) parses the real SV modules (package-import headers and all), so `deframer_rtl`
+    binds the item-27 accumulator-guard proof to the shipped `pipe7_rx_deframer.sv` directly (no
+    re-model). `make formal` now runs six proofs. yosys-slang supports immediate assertions (not
+    concurrent SVA); the `int`-typed combinational modules (gearbox) and the assume-guarantee
+    credit loop translate more reliably as `reg`-typed re-models, so those keep their re-models —
+    re-targeting the remainder is a follow-on as slang coverage/idioms firm up.
 32. **True dual-clock CDC formal + reset synchronization.** The `fifo_cdc` proof ties
     `wr_clk==rd_clk` (proves storage/flag consistency, not metastability-safe crossing). *Deliver:*
     multi-clock formal, CDC/SDC constraints, and a reset-synchronization review of async `rst_n`

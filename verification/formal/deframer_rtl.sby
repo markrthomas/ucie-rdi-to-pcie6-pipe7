@@ -1,0 +1,20 @@
+# deframer_rtl.sby -- SymbiYosys proof bound to the ACTUAL pipe7_rx_deframer RTL via the
+# yosys-slang SystemVerilog frontend (closure-plan item 31). Proves the item-27 accumulator
+# overflow guard (rfill bounded) on the shipped module, not a re-model.
+
+[options]
+mode bmc
+depth 30
+
+[engines]
+smtbmc
+
+[script]
+plugin -i slang
+read_slang --top deframer_rtl_props deframer_rtl_props.sv pipe7_pkg.sv pipe7_rx_deframer.sv
+prep -flatten -top deframer_rtl_props
+
+[files]
+deframer_rtl_props.sv
+../../src/pipe7_pkg.sv
+../../src/pipe7_rx_deframer.sv
