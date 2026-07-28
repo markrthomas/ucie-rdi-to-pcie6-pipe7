@@ -20,6 +20,10 @@ module pipe7_bridge_top
     input  logic                     rdi_clk,
     input  logic                     reset_n,
 
+    // ---- RX garbage-inject knob (Phase G fcov: forces sync_error; default = PHY loopback) ----
+    input  logic                     rx_inject_en,
+    input  logic [PIPE_WIDTH-1:0]    rx_inject_data,
+
     // ---- UCIe RDI TX flit in (credit-gated) ----
     input  logic                     rdi_tx_valid,
     input  logic [RDI_WIDTH-1:0]     rdi_tx_data,
@@ -91,8 +95,9 @@ module pipe7_bridge_top
         .block_locked, .sync_error, .in_data_phase, .rx_overflow
     );
 
-    // PHY loopback + responders.
-    assign rx_data = tx_data;
+    // PHY loopback + responders. rx_inject_en swaps the looped-back TxData for caller-supplied
+    // garbage so the fcov driver can drive the deframer out of sync (sync_error path).
+    assign rx_data = rx_inject_en ? rx_inject_data : tx_data;
     pipe7_phy_responder_stub #(.LATENCY(4)) phy (
         .pclk, .reset_n, .power_down, .rate, .width, .rx_width,
         .pclk_change_ack, .phy_status, .pclk_change_ok

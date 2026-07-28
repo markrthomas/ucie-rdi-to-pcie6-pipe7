@@ -22,8 +22,9 @@ import pyuvm
 from models import coverage_model as cov
 from models import rdi_model as rm
 
-RDI_WIDTH = 64
-CREDITS   = 8
+PIPE_WIDTH = 80
+RDI_WIDTH  = 64
+CREDITS    = 8
 
 # control encodings (pipe7_pkg)
 REQ_POWER, REQ_RATE, REQ_WIDTH = 0, 1, 2
@@ -40,6 +41,8 @@ class FcovTest(uvm_test):
     async def run_phase(self):
         self.raise_objection()
         dut = cocotb.top
+        self.stall_sink = False
+        self.fill_stop = True
         cocotb.start_soon(Clock(dut.pclk, 10, units="ns").start())
         cocotb.start_soon(Clock(dut.rdi_clk, 14, units="ns").start())
         self._init(dut)
@@ -65,6 +68,10 @@ class FcovTest(uvm_test):
         await self._ctrl_req(dut, REQ_RATE, rate=RATE_GEN5)
         self.logger.info("[FCOV] phase: rdi traffic (Gen5)")
         await self._rdi_traffic(dut)
+        self.logger.info("[FCOV] phase: rx garbage inject (sync_error)")
+        await self._inject_garbage(dut)
+        self.logger.info("[FCOV] phase: sink stall (rx_overflow)")
+        await self._sink_stall(dut)
         self.logger.info("[FCOV] phase: settle")
 
         for _ in range(40):
@@ -75,9 +82,10 @@ class FcovTest(uvm_test):
 
     # ---- init ----
     def _init(self, dut):
-        for sig in ("rdi_tx_valid", "rdi_tx_data", "rdi_tx_sob", "rdi_tx_is_os", "rdi_rx_crd",
-                    "req_valid", "req_kind", "req_power_down", "mb_req_valid", "mb_req_write",
-                    "mb_req_committed", "mb_req_addr", "mb_req_wdata"):
+        for sig in ("rx_inject_en", "rx_inject_data", "rdi_tx_valid", "rdi_tx_data", "rdi_tx_sob",
+                    "rdi_tx_is_os", "rdi_rx_crd", "req_valid", "req_kind", "req_power_down",
+                    "mb_req_valid", "mb_req_write", "mb_req_committed", "mb_req_addr",
+                    "mb_req_wdata"):
             getattr(dut, sig).value = 0
         dut.req_rate.value = RATE_GEN5
         dut.req_width.value = W_80
@@ -222,12 +230,83 @@ class FcovTest(uvm_test):
                 break
 
     async def _rx_sink(self, dut):
+        # Owns rdi_rx_crd for the whole run: returns a credit per recovered flit, except while
+        # self.stall_sink is set (the overflow phase), when it holds credits at 0.
         while True:
             await FallingEdge(dut.rdi_clk)
-            if int(dut.reset_n.value) != 1:
+            if int(dut.reset_n.value) != 1 or self.stall_sink:
                 dut.rdi_rx_crd.value = 0
                 continue
             dut.rdi_rx_crd.value = int(dut.rdi_rx_valid.value)
+
+    # ---- error injection (reach the last status bins) ----
+    async def _tx_filler(self, dut):
+        """Keep TX flits flowing (credit-gated) so tx_data_valid -- and thus the deframer's
+        rx_valid -- keeps pulsing. Runs until self.fill_stop."""
+        rng = random.Random(0x1234)
+        avail = CREDITS
+        while not self.fill_stop:
+            await FallingEdge(dut.rdi_clk)
+            avail += int(dut.rdi_tx_crd.value)
+            if avail > 0:
+                dut.rdi_tx_data.value = rng.getrandbits(RDI_WIDTH)
+                dut.rdi_tx_sob.value = rng.getrandbits(1)
+                dut.rdi_tx_is_os.value = rng.getrandbits(1)
+                dut.rdi_tx_valid.value = 1
+                avail -= 1
+            else:
+                dut.rdi_tx_valid.value = 0
+        dut.rdi_tx_valid.value = 0
+
+    async def _inject_garbage(self, dut):
+        """Drive misaligned RxData so the deframer loses sync -> sync_error=1. Garbage is only
+        clocked into the deframer while tx_data_valid (=rx_valid) pulses, so keep TX flowing."""
+        self.fill_stop = False
+        cocotb.start_soon(self._tx_filler(dut))
+        dut.rx_inject_en.value = 1
+        seen = False
+        for k in range(160):
+            dut.rx_inject_data.value = (1 << PIPE_WIDTH) - 1 if (k & 1) else 0x3
+            await FallingEdge(dut.pclk)
+            if int(dut.sync_error.value) == 1:
+                seen = True
+                break
+        dut.rx_inject_en.value = 0
+        self.fill_stop = True
+        # Let the deframer re-lock on the restored loopback.
+        for _ in range(30):
+            await FallingEdge(dut.pclk)
+        assert seen, "sync_error never asserted under sustained garbage RX injection"
+
+    async def _sink_stall(self, dut):
+        """Stall the RX credit return while TX keeps flowing so the RX CDC fills -> rx_overflow=1."""
+        rng = random.Random(0x5A5A)
+        blocks = [(rng.getrandbits(128), bool(rng.getrandbits(1))) for _ in range(48)]
+        flits = rm.blocks_to_flits(blocks, RDI_WIDTH)
+        # Hold off the sink: _rx_sink keeps rdi_rx_crd at 0 while stall_sink is set.
+        self.stall_sink = True
+        seen = False
+        i = 0
+        avail = CREDITS
+        for _ in range(600):
+            await FallingEdge(dut.rdi_clk)
+            avail += int(dut.rdi_tx_crd.value)
+            if i < len(flits) and avail > 0:
+                data, sob, is_os = flits[i]
+                dut.rdi_tx_data.value = data
+                dut.rdi_tx_sob.value = int(sob)
+                dut.rdi_tx_is_os.value = int(is_os)
+                dut.rdi_tx_valid.value = 1
+                avail -= 1
+                i += 1
+            else:
+                dut.rdi_tx_valid.value = 0
+            if int(dut.rx_overflow.value) == 1:
+                seen = True
+                break
+        dut.rdi_tx_valid.value = 0
+        self.stall_sink = False
+        assert seen, "rx_overflow never asserted under a stalled RX sink"
 
     # ---- report ----
     def _finish(self):

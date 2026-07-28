@@ -447,6 +447,21 @@ recorded baseline). Remaining ~11 uncovered lines are documented non-executable:
 (`PCLK_IS_PHY_INPUT=0`), intentional tie-offs, Gen6-RX-through-bridge (covered standalone by the
 `gen6` smoke + cocotb `test_gen6_rx`), and one function-return line Verilator mis-attributes.
 
+**Phase G — independent functional-coverage DV (delivered):** a redundant cross-check to the
+Verilator line gate, independent on three axes — engine (**Icarus Verilog**, not Verilator), tool
+(**`cocotb_coverage`**, pure-Python bin scoring), and metric (functional bins, not lines). 43
+(iverilog bring-up: one behaviour-neutral CDC-buffer storage split — array-of-packed-struct →
+parallel `buf_data[]`/`buf_error[]` mems — lets the **identical shipped `src/` RTL** elaborate under
+both engines with no `sv2v`; Verilator regress 17/17 + coverage bit-for-bit at 651/662; committed
+`make cocotb_icarus` shim runs `bridge` + `gen6_rx` on Icarus 14.0; the independent engine surfaced
+and fixed a real iverilog enum→port width-truncation bug on `RATE_GEN6`). 44 (spec-derived
+`cocotb_coverage` model `test/cocotb/models/coverage_model.py` — 19 coverpoints / 45 reachable bins
+over control/msgbus/datapath/RDI; `test_fcov.py` baseline driver with fail-fast bounded waits;
+93.5% baseline). 45 (RX-inject + sink-stall knobs close the last bins → **45/45 = 100% functional**
+on Icarus; `make fcov` gates ≥98% and writes `report/fcov.{json,txt}`; `gen_report.py` folds the
+independent number into the JSON/MD/HTML report + CI step-summary alongside the Verilator line
+union; `docs_check`-guarded in `docs/verification_plan.md`).
+
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
     sink makes `dp_rx_valid` write a **full** `rx_cdc` and the block is silently dropped (today the

@@ -3,7 +3,7 @@
 # `make` (no target) prints the grouped target list below. Verilator is the OSS gate;
 # the PyUVM-on-Cocotb tier (`make cocotb`) and the VCS/UVM tier (`make uvm`) sit above it.
 
-.PHONY: all check ci clean cocotb cocotb_icarus coverage coverage_merge coverage_summary docs_check docs_pdf formal report report_check \
+.PHONY: all check ci clean cocotb cocotb_icarus fcov coverage coverage_merge coverage_summary docs_check docs_pdf formal report report_check \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
         verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
@@ -458,6 +458,7 @@ report:
 	-@$(MAKE) --no-print-directory coverage_merge      > $(REPORT_DIR)/logs/coverage.log 2>&1
 	-@$(MAKE) --no-print-directory formal            > $(REPORT_DIR)/logs/formal.log 2>&1
 	-@$(MAKE) --no-print-directory -C test/cocotb SIM=verilator all_tests > $(REPORT_DIR)/logs/cocotb.log 2>&1
+	-@$(MAKE) --no-print-directory fcov                > $(REPORT_DIR)/logs/fcov.log 2>&1
 	@python3 scripts/gen_report.py --root $(CURDIR) --out $(CURDIR)/$(REPORT_DIR)
 
 # Item 38: perf/quality threshold gate over report/metrics.json. Advisory / opt-in -- run after
@@ -555,6 +556,22 @@ cocotb_icarus:
 	$(MAKE) -C test/cocotb SIM=icarus ICARUS_BIN_DIR=$(ICARUS_BIN_DIR) gen6_rx
 	@echo "[COCOTB ICARUS] bridge + gen6_rx PASS on Icarus Verilog (independent engine)"
 
+# Phase G (item 45): INDEPENDENT functional coverage on the Icarus engine, scored by
+# cocotb_coverage (a tool wholly separate from Verilator). Redundant cross-check to the Verilator
+# line union; gates >= FCOV_MIN % of the spec-derived bins. Writes report/fcov.{json,txt}.
+FCOV_MIN ?= 98.0
+fcov:
+	@if ! command -v cocotb-config >/dev/null 2>&1; then \
+		echo "[FCOV] cocotb not found; pip install -r test/cocotb/requirements.txt to run Phase G"; \
+		exit 0; \
+	fi
+	@bash scripts/gen_cocotb_icarus_bin.sh $(ICARUS_BIN_DIR)
+	@mkdir -p $(REPORT_DIR)
+	$(MAKE) -C test/cocotb SIM=icarus ICARUS_BIN_DIR=$(ICARUS_BIN_DIR) FCOV_OUT=$(CURDIR)/$(REPORT_DIR) fcov
+	@python3 -c "import json,sys; d=json.load(open('$(REPORT_DIR)/fcov.json')); p=d['pct']; ok=p>=$(FCOV_MIN); \
+print(f\"[FCOV] {d['bins_hit']}/{d['bins_total']} bins = {p}% functional (cocotb_coverage/Icarus), threshold {$(FCOV_MIN)}% : {'PASS' if ok else 'FAIL'}\"); \
+sys.exit(0 if ok else 1)"
+
 uvm_compile:
 	$(UVM_MAKE) compile
 
@@ -600,6 +617,10 @@ docs_check:
 	@grep -qi "integrated" docs/architecture.md || { echo "docs_check: architecture.md must describe the integrated bridge top"; exit 1; }
 	@grep -qi "credit_fc\|gearbox\|dataphase" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the formal proofs"; exit 1; }
 	@grep -q "pipe7_rdi_ingress\|pipe7_rdi_egress" docs/architecture.md || { echo "docs_check: architecture.md must describe the credit-based RDI front end"; exit 1; }
+	@# Phase G (item 45): the docs must record the independent (iverilog + cocotb_coverage) coverage cross-check.
+	@grep -q "Redundant / independent coverage" docs/verification_plan.md || { echo "docs_check: verification_plan.md must have the Redundant / independent coverage subsection (item 45)"; exit 1; }
+	@grep -q "cocotb_coverage" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the independent cocotb_coverage functional metric (item 45)"; exit 1; }
+	@grep -q "45/45" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the independent functional-coverage baseline (45/45)"; exit 1; }
 	@echo "Documentation check passed"
 
 # ============================ Vendor simulators ============================

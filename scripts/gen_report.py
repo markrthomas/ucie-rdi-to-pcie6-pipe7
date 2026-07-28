@@ -103,6 +103,17 @@ def parse_formal(log: Path):
     return proofs
 
 
+def parse_fcov(out: Path):
+    """Independent functional coverage (Phase G): report/fcov.json -> dict or None."""
+    f = out / "fcov.json"
+    if not f.exists():
+        return None
+    try:
+        return json.loads(f.read_text())
+    except (ValueError, OSError):
+        return None
+
+
 def parse_cocotb(xml_path: Path):
     """cocotb JUnit -> [(name, 'PASS'|'FAIL', time_s, sim_time_ns)]."""
     if not xml_path.exists():
@@ -152,7 +163,7 @@ def kpi_rows(perf):
 
 
 # ---------------------------------------------------------------- emitters
-def build_metrics(perf, tags, cov, formal, cocotb, sha):
+def build_metrics(perf, tags, cov, formal, cocotb, sha, fcov=None):
     return {
         "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "git_sha": sha,
@@ -163,6 +174,7 @@ def build_metrics(perf, tags, cov, formal, cocotb, sha):
             "pct": cov["total"][2],
             "files": [{"file": f, "hit": h, "lines": n, "pct": p} for f, h, n, p in cov["files"]],
         },
+        "functional_coverage": fcov,
         "smokes": [{"tag": t, "detail": d} for t, d in tags],
         "formal": formal,
         "cocotb": [{"name": n, "status": s, "time_s": t, "sim_time_ns": st}
@@ -181,9 +193,17 @@ def build_md(m, cov, formal, cocotb, tags, perf):
         L += [f"| {lbl} | {val} | {unit} |" for lbl, val, unit, _ in rows] + [""]
     if cov:
         h, n, p = cov["total"]
-        L += ["## Line coverage", "", f"**{h}/{n} = {p}%**", "",
+        L += ["## Line coverage", "", f"**{h}/{n} = {p}%** (Verilator, DUT `src/` union)", "",
               "| File | Lines | % |", "|------|------:|--:|"]
         L += [f"| {f} | {hh}/{nn} | {pp}% |" for f, hh, nn, pp in cov["files"]] + [""]
+    fc = m.get("functional_coverage")
+    if fc:
+        L += ["## Independent functional coverage (redundant cross-check)", "",
+              f"**{fc['bins_hit']}/{fc['bins_total']} bins = {fc['pct']}%** "
+              f"— `{fc['tool']}` on the **{fc['engine']}** engine (independent of Verilator).", "",
+              "| Coverpoint | Bins | % |", "|------------|-----:|--:|"]
+        L += [f"| {pt['name']} | {pt['covered']}/{pt['size']} | {pt['pct']}% |"
+              for pt in fc.get("points", [])] + [""]
     if tags:
         L += ["## Verilator smokes", "", "| Smoke | Detail |", "|-------|--------|"]
         L += [f"| {t} | {d} |" for t, d in tags] + [""]
@@ -222,8 +242,18 @@ def build_html(m, cov, formal, cocotb, tags, perf):
         h, n, p = cov["total"]
         trs = "".join(f'<tr><td>{html.escape(f)}</td><td class="r">{hh}/{nn}</td>'
                       f'<td>{_bar(pp)}</td></tr>' for f, hh, nn, pp in cov["files"])
-        P.append(f'<h2>Line coverage <small>{h}/{n} = {p}%</small></h2>'
+        P.append(f'<h2>Line coverage <small>{h}/{n} = {p}% (Verilator, DUT src/)</small></h2>'
                  f'<table><tr><th>File</th><th>Lines</th><th>Coverage</th></tr>{trs}</table>')
+    fc = m.get("functional_coverage")
+    if fc:
+        trs = "".join(f'<tr><td>{html.escape(pt["name"])}</td>'
+                      f'<td class="r">{pt["covered"]}/{pt["size"]}</td>'
+                      f'<td>{_bar(pt["pct"])}</td></tr>' for pt in fc.get("points", []))
+        P.append(f'<h2>Independent functional coverage '
+                 f'<small>{fc["bins_hit"]}/{fc["bins_total"]} bins = {fc["pct"]}% · '
+                 f'{html.escape(fc["tool"])} on {html.escape(fc["engine"])} '
+                 f'(redundant cross-check)</small></h2>'
+                 f'<table><tr><th>Coverpoint</th><th>Bins</th><th>Coverage</th></tr>{trs}</table>')
     if tags:
         trs = "".join(f'<tr><td>{_badge(True)} {html.escape(t)}</td>'
                       f'<td>{html.escape(d)}</td></tr>' for t, d in tags)
@@ -314,17 +344,19 @@ def main():
     cov = parse_coverage(root / "coverage.info")
     formal = parse_formal(logs / "formal.log")
     cocotb = parse_cocotb(root / "test" / "cocotb" / "results.xml")
+    fcov = parse_fcov(out)
     sha = git_sha(root)
 
-    m = build_metrics(perf, tags, cov, formal, cocotb, sha)
+    m = build_metrics(perf, tags, cov, formal, cocotb, sha, fcov)
     (out / "metrics.json").write_text(json.dumps(m, indent=2) + "\n")
     (out / "report.md").write_text(build_md(m, cov, formal, cocotb, tags, perf) + "\n")
     (out / "report.html").write_text(build_html(m, cov, formal, cocotb, tags, perf))
 
     cpct = cov["total"][2] if cov else "n/a"
+    fpct = f"{fcov['pct']}%" if fcov else "n/a"
     print(f"[REPORT] wrote {out}/metrics.json, report.md, report.html  "
           f"(perf_runs={len(perf)} smokes={len(tags)} coverage={cpct}% "
-          f"formal={len(formal)} cocotb={len(cocotb)})")
+          f"fcov={fpct} formal={len(formal)} cocotb={len(cocotb)})")
 
 
 if __name__ == "__main__":

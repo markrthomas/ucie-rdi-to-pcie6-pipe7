@@ -36,6 +36,12 @@ Two-tier, mirroring the predecessor's methodology:
 - **PyUVM-on-Cocotb** — runnable cross-check (`make cocotb`, a required CI gate): independent
   Python models cross-check the datapath, control plane, and message bus, **plus the integrated
   bridge end-to-end** (`test_bridge.py`, 3-way) and a **Gen6-wide RX** check (`test_gen6_rx.py`).
+- **Independent coverage** — a redundant cross-check to the Verilator line gate, independent on
+  three axes: engine (**Icarus Verilog**, `make cocotb_icarus` / `make fcov`), tool
+  (**`cocotb_coverage`**, pure-Python), and metric (functional bins). Both engines compile the
+  identical shipped `src/` RTL (no `sv2v`). `make fcov` scores a spec-derived model and gates
+  **≥98%** — current baseline **45/45 = 100% functional coverage** on Icarus, surfaced beside the
+  Verilator line union in `make report`.
 - **Performance & KPIs** — `make report` aggregates throughput/latency/utilization/occupancy
   (from a bound `pipe7_perf_monitor`) + DUT coverage + smoke/formal/cocotb status into
   `report/{metrics.json, report.md, report.html}`; `make report_check` gates them against

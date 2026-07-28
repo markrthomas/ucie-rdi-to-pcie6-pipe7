@@ -57,6 +57,8 @@ endif
 
 # Make our Python packages (models/, agents/, seq_lib/) importable by the test module.
 export PYTHONPATH := $(ROOT)/test/cocotb:$(PYTHONPATH)
+# Phase G: where test_fcov writes its functional-coverage report (must reach the sim subprocess).
+export FCOV_OUT
 
 ifeq ($(SIM),verilator)
     EXTRA_ARGS += -Wno-UNUSEDPARAM -Wno-fatal
@@ -67,7 +69,7 @@ include $(shell cocotb-config --makefiles)/Makefile.sim
 .DEFAULT_GOAL := sim
 
 # Each test drives a different TOPLEVEL, so sim_build must be cleaned between them.
-.PHONY: datapath ctrl_plane msgbus bridge gen6_rx all_tests
+.PHONY: datapath ctrl_plane msgbus bridge gen6_rx fcov all_tests
 datapath:
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_datapath
 ctrl_plane:
@@ -78,6 +80,8 @@ bridge:
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_bridge
 gen6_rx:
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_gen6_rx
+fcov:
+	rm -rf sim_build results.xml && $(MAKE) MODULE=test_fcov
 all_tests:
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_datapath
 	rm -rf sim_build results.xml && $(MAKE) MODULE=test_ctrl_plane

@@ -121,6 +121,36 @@ via `make lint`.
   message-bus-opcode, and PhyStatus-latency covergroups; percentages via `get_coverage()` in
   `report_phase`.
 
+### Redundant / independent coverage (Phase G, items 43–45)
+
+The primary line-coverage gate above is Verilator's. To make coverage confidence *engine-* and
+*tool-independent* — not just a single toolchain's self-report — Phase G adds a second, fully
+independent measurement built from three separate axes:
+
+- **Independent engine:** the cocotb testbench runs on **Icarus Verilog** (`make cocotb_icarus`,
+  `make fcov`), not Verilator. Both engines compile the **identical shipped `src/` RTL** (the only
+  change was a behaviour-neutral CDC-buffer storage split, item 43, kept bit-for-bit at 651/662),
+  so this is genuine engine diversity rather than a transformed copy — `sv2v` is deliberately
+  unused. Running the independent engine even surfaced a real portability bug (an iverilog
+  enum→port width truncation on `RATE_GEN6`, fixed in the cocotb wrapper).
+- **Independent tool + metric:** functional-coverage bins are scored by **`cocotb_coverage`** (pure
+  Python), a tool wholly separate from Verilator's line counter. The model
+  (`test/cocotb/models/coverage_model.py`) is **spec-derived** from the interface state/encoding
+  space — 19 coverpoints / 45 reachable bins over control (PowerDown, Rate, Width, request kind,
+  accept/reject), message bus (opcode, is-read, committed), datapath/framing (rate, block-lock,
+  `sync_error`, data-phase, tx-valid), and RDI/credits/overflow (`tx_crd`, `rx_valid`, OS/SOB,
+  `rx_overflow`). Structurally-unreachable bins are documented and dropped (e.g. `tx_crd` returns
+  only 0 or FPB=2, never 1), never gerrymandered.
+- **Independent gate:** `make fcov` (`SIM=icarus`) writes `report/fcov.{json,txt}`, emits
+  `[FCOV] … bins = …%`, and asserts **≥ 98%** (`FCOV_MIN`, advisory-then-gate, mirroring
+  `report_check`). Current baseline: **45/45 bins = 100 %** functional coverage on the independent
+  Icarus engine.
+
+Both numbers are surfaced side-by-side by `make report` (`scripts/gen_report.py` folds
+`report/fcov.json` into the JSON/Markdown/HTML report and the CI step summary): the **Verilator
+line union 651/662 = 98.34 %** and the **independent `cocotb_coverage` functional 45/45 = 100 %**.
+This is a redundant cross-check for confidence — Verilator line coverage remains the primary gate.
+
 ## Performance / KPIs
 
 A passive perf monitor (`test/pipe7_perf_monitor.sv`, `bind`-attached to the bridge, item 36)

@@ -73,6 +73,8 @@ class BridgeTest(uvm_test):
 
     # ---- stimulus / capture ----
     def _init_inputs(self, dut):
+        dut.rx_inject_en.value = 0       # default: PHY loopback (no garbage injection)
+        dut.rx_inject_data.value = 0
         dut.rdi_tx_valid.value = 0
         dut.rdi_tx_data.value = 0
         dut.rdi_tx_sob.value = 0

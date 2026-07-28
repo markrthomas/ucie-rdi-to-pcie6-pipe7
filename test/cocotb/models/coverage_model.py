@@ -75,7 +75,7 @@ def sample_dp(s):
 
 
 # ---- RDI credits / overflow (observed) ----------------------------------------------------
-@CoverPoint("bridge.rdi.tx_crd", xf=lambda s: s["tx_crd"], bins=[0, 1, 2])
+@CoverPoint("bridge.rdi.tx_crd", xf=lambda s: s["tx_crd"], bins=[0, 2])  # 0 or FPB(=2)/block; never 1
 @CoverPoint("bridge.rdi.rx_valid", xf=lambda s: s["rx_valid"], bins=[0, 1])
 @CoverPoint("bridge.rdi.is_os", xf=lambda s: s["is_os"], bins=[0, 1])
 @CoverPoint("bridge.rdi.sob", xf=lambda s: s["sob"], bins=[0, 1])
