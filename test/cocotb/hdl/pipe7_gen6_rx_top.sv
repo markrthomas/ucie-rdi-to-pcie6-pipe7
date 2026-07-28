@@ -29,9 +29,17 @@ module pipe7_gen6_rx_top
     output logic                  in_data_phase
 );
 
+    // Route the rate/power-state constants through explicit 4-bit nets rather than connecting
+    // the enum members straight to the ports: Icarus (the independent-engine cross-check, Phase G)
+    // sizes a package enum member as 1 bit in a direct port connection and truncates RATE_GEN6
+    // (4'd5) to its LSB (=1), so the datapath never enters Gen6 -- an assignment preserves the
+    // full 4-bit value in both Icarus and Verilator.
+    logic [3:0] rate_sel = RATE_GEN6;
+    logic [3:0] pd_sel   = PD_P0;
+
     pipe7_mac_datapath_ra #(.PIPE_WIDTH(PIPE_WIDTH)) dp (
         .clk, .reset_n,
-        .rate(RATE_GEN6), .power_down(PD_P0), .data_enable(1'b1),
+        .rate(rate_sel), .power_down(pd_sel), .data_enable(1'b1),
         .pam4_restricted_levels('0),
         // Gen5 block inputs unused in Gen6 mode
         .g5_pl_cnt(2'd0), .g5_pl_data0('0), .g5_pl_is_os0(1'b0),

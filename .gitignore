@@ -52,6 +52,7 @@ test/cocotb/sim_build/
 test/cocotb/results.xml
 test/cocotb/dump.vcd
 test/cocotb/vectors/*.txt
+test/cocotb/.icarus_bin/
 
 # This Env
 NOTES.md

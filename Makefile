@@ -3,7 +3,7 @@
 # `make` (no target) prints the grouped target list below. Verilator is the OSS gate;
 # the PyUVM-on-Cocotb tier (`make cocotb`) and the VCS/UVM tier (`make uvm`) sit above it.
 
-.PHONY: all check ci clean cocotb coverage coverage_merge coverage_summary docs_check docs_pdf formal report report_check \
+.PHONY: all check ci clean cocotb cocotb_icarus coverage coverage_merge coverage_summary docs_check docs_pdf formal report report_check \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
         verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
@@ -188,6 +188,7 @@ help:
 	@echo ""
 	@echo "Cross-checks & UVM:"
 	@echo "  make cocotb [COCOTB_SIM=verilator|icarus]"
+	@echo "  make cocotb_icarus     # independent-engine cross-check (Icarus): bridge + gen6_rx"
 	@echo "                         Tier 1b PyUVM-on-Cocotb cross-checks (datapath+ctrl+msgbus)"
 	@echo "  make uvm               VCS/UVM compile+run (test/uvm; not in OSS CI)"
 	@echo "  make uvm_compile | uvm_run | uvm_pdf"
@@ -539,6 +540,20 @@ cocotb:
 		exit 0; \
 	fi
 	$(MAKE) -C test/cocotb SIM=$(COCOTB_SIM) all_tests
+
+# Phase G (item 43): run the cocotb env on the INDEPENDENT Icarus Verilog engine as a redundant
+# cross-check to the Verilator gate. The ICARUS_BIN_DIR shim points cocotb's embedded Python at the
+# system cocotb interpreter (see scripts/gen_cocotb_icarus_bin.sh for why oss-cad-suite needs it).
+ICARUS_BIN_DIR := $(CURDIR)/test/cocotb/.icarus_bin
+cocotb_icarus:
+	@if ! command -v cocotb-config >/dev/null 2>&1; then \
+		echo "[COCOTB] cocotb not found; pip install -r test/cocotb/requirements.txt to run Tier 1b"; \
+		exit 0; \
+	fi
+	@bash scripts/gen_cocotb_icarus_bin.sh $(ICARUS_BIN_DIR)
+	$(MAKE) -C test/cocotb SIM=icarus ICARUS_BIN_DIR=$(ICARUS_BIN_DIR) bridge
+	$(MAKE) -C test/cocotb SIM=icarus ICARUS_BIN_DIR=$(ICARUS_BIN_DIR) gen6_rx
+	@echo "[COCOTB ICARUS] bridge + gen6_rx PASS on Icarus Verilog (independent engine)"
 
 uvm_compile:
 	$(UVM_MAKE) compile

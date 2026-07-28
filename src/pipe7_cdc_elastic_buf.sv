@@ -37,12 +37,14 @@ module pipe7_cdc_elastic_buf #(
 
     localparam int PTR_WIDTH = $clog2(BUFFER_DEPTH) + 1;
 
-    typedef struct packed {
-        logic [INPUT_DATA_WIDTH-1:0] data;
-        logic error;
-    } entry_t;
-
-    entry_t buffer [BUFFER_DEPTH];
+    // Storage is two parallel memories (data + error) rather than an array of a packed
+    // {data,error} struct. The two forms are functionally identical, but the parallel-memory
+    // form is portable across the independent DV engine (iverilog cannot elaborate an
+    // array-of-packed-struct with a bit-select on a field -- it hits a packed-dimensions
+    // assertion), whereas Verilator handles both. Keeping this form lets both engines run the
+    // identical shipped RTL (see docs/verification_plan.md, Phase G).
+    logic [INPUT_DATA_WIDTH-1:0] buf_data  [BUFFER_DEPTH];
+    logic                        buf_error [BUFFER_DEPTH];
 
     // --- Gray Code Conversions ---
     function automatic logic [PTR_WIDTH-1:0] bin2gray(input logic [PTR_WIDTH-1:0] bin);
@@ -67,10 +69,8 @@ module pipe7_cdc_elastic_buf #(
         if (!rst_n) begin
             wr_ptr <= '0;
         end else if (wr_valid && wr_ready) begin
-            buffer[wr_ptr[PTR_WIDTH-2:0]] <= '{
-                data: wr_data,
-                error: wr_error
-            };
+            buf_data [wr_ptr[PTR_WIDTH-2:0]] <= wr_data;
+            buf_error[wr_ptr[PTR_WIDTH-2:0]] <= wr_error;
             wr_ptr <= wr_ptr + 1'b1;
         end
     end
@@ -101,14 +101,14 @@ module pipe7_cdc_elastic_buf #(
     generate
         if (OUTPUT_DATA_WIDTH > INPUT_DATA_WIDTH) begin : GEN_EXTEND
             assign rd_data_mux = {{(OUTPUT_DATA_WIDTH-INPUT_DATA_WIDTH){1'b0}},
-                                  buffer[rd_ptr[PTR_WIDTH-2:0]].data};
+                                  buf_data[rd_ptr[PTR_WIDTH-2:0]]};
         end else if (OUTPUT_DATA_WIDTH < INPUT_DATA_WIDTH) begin : GEN_TRUNCATE
-            assign rd_data_mux = buffer[rd_ptr[PTR_WIDTH-2:0]].data[OUTPUT_DATA_WIDTH-1:0];
+            assign rd_data_mux = buf_data[rd_ptr[PTR_WIDTH-2:0]][OUTPUT_DATA_WIDTH-1:0];
         end else begin : GEN_DIRECT
-            assign rd_data_mux = buffer[rd_ptr[PTR_WIDTH-2:0]].data;
+            assign rd_data_mux = buf_data[rd_ptr[PTR_WIDTH-2:0]];
         end
     endgenerate
-    assign rd_error_mux = buffer[rd_ptr[PTR_WIDTH-2:0]].error;
+    assign rd_error_mux = buf_error[rd_ptr[PTR_WIDTH-2:0]];
 
     // Standard registered output FIFO logic
     always_ff @(posedge rd_clk or negedge rst_n) begin
