@@ -34,6 +34,7 @@ SMOKES=(
   "timeout  TIMEOUT_TOP     TIMEOUT_FILES     "
   "burst    BURST_TOP       BURST_FILES       "
   "dgbovf   DEFRAMER_GB_OVF_TOP  DEFRAMER_GB_OVF_FILES  "
+  "bcov     BRIDGE_COV_TOP       BRIDGE_COV_FILES       "
 )
 
 for entry in "${SMOKES[@]}"; do

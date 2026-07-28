@@ -75,7 +75,8 @@ module pipe7_rdi_egress
                     if (word_idx == IW'(FPB - 1)) state <= E_IDLE;
                     else                          word_idx <= word_idx + 1'b1;
                 end
-                default: state <= E_IDLE;
+                // coverage: unreachable defensive default (both states enumerated)
+                /* verilator coverage_off */ default: state <= E_IDLE; /* verilator coverage_on */
             endcase
         end
     end

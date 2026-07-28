@@ -32,7 +32,7 @@ Two-tier, mirroring the predecessor's methodology:
   smoke (RDI round-trip + control + message bus, assertions bound) plus per-block self-checking
   smokes (control FSM, message bus, Gen5 framing + full-width gearbox, Gen6 datapath, rate-aware
   datapath, RDI credit FC, CDC, protocol SVA), a reduced-config param smoke, and line coverage
-  (`make regress_cov`; **DUT** baseline **~94% line (628/667, `src/` union across the smoke suite)** on the integrated bridge).
+  (`make regress_cov`; **DUT** baseline **~98% line (651/662, `src/` union across the smoke suite)** on the integrated bridge).
 - **PyUVM-on-Cocotb** — runnable cross-check (`make cocotb`, a required CI gate): independent
   Python models cross-check the datapath, control plane, and message bus, **plus the integrated
   bridge end-to-end** (`test_bridge.py`, 3-way) and a **Gen6-wide RX** check (`test_gen6_rx.py`).

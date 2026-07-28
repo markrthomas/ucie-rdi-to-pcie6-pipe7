@@ -105,12 +105,18 @@ via `make lint`.
 
 - **Line coverage** (`make coverage_merge` → `coverage.info`; `make coverage_summary`): the
   **union** across the whole Verilator smoke suite (each smoke built with `--coverage`, the
-  per-smoke `coverage.dat` merged, item 40) — current **DUT** baseline **~94% line** (628/667,
+  per-smoke `coverage.dat` merged, item 40) — current **DUT** baseline **~98% line** (651/662,
   `src/` only; testbenches, stubs, the perf monitor, and the assertion module are verification
   code and are excluded). The single integrated-bridge smoke alone covers only the Gen5 path
   (~84%); the standalone smokes add Gen6, the gearbox bursts, every FSM transition, all
-  message-bus opcodes, and the watchdogs. Remaining uncovered lines are error-path and
-  intentionally-unreachable defensive branches, driven toward &gt;98% by items 41–42.
+  message-bus opcodes, and the watchdogs (item 40, ~94%). The directed error-path tests
+  (`tb_pipe7_timeout` rate/pclk-input/committed-write watchdogs, `tb_pipe7_deframer_gb_ovf`
+  flush/slip, `tb_pipe7_mac_bridge_cov` `sync_error`/`rx_overflow`, item 41–42) close the
+  reachable residuals. The five unreachable defensive `default:` arms carry a justified
+  `// verilator coverage_off` (unique-case FSMs); the ~11 lines that remain uncovered are
+  config-dead ports (`PCLK_IS_PHY_INPUT`=0 handshake), intentionally-unused tie-off signals, the
+  Gen6-RX-through-bridge integration (covered standalone by the `gen6` smoke + cocotb
+  `test_gen6_rx`), and a function-return line the tool mis-attributes.
 - **Functional coverage** (Tier 2 UVM, item 11): Rate×Width, PowerDown-state, framing-mode,
   message-bus-opcode, and PhyStatus-latency covergroups; percentages via `get_coverage()` in
   `report_phase`.
@@ -135,7 +141,7 @@ operating point (rdi_clk ≈ 71 MHz / pclk 100 MHz), not silicon timing.**
 | Peak credits outstanding | max in-flight egress credits | `[PERF] egress_peak_outstanding` | 1 | — |
 | RX overflow drops | recovered blocks dropped (in-envelope) | `[PERF] rx_overflow` | 0 | 0 |
 | TX-CDC stall cycles | cycles TX CDC full | `[PERF] tx_stall_cyc` | 0 | — |
-| DUT line coverage | `src/` lines hit | `coverage.info` | 628/667 = 94.2 % | ≥ 80 % |
+| DUT line coverage | `src/` lines hit | `coverage.info` | 651/662 = 98.3 % | ≥ 80 % |
 | Formal proofs | BMC + cover PASS | `make formal` | 8/8 | 8/8 |
 
 The threshold gate is **advisory / opt-in** (runs `continue-on-error` in CI) so a simulation

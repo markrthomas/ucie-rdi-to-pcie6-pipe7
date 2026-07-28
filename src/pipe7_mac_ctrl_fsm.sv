@@ -131,7 +131,8 @@ module pipe7_mac_ctrl_fsm
                                     req_error <= 1'b1;      // not in P0/P1: reject, no change
                                 end
                             end
-                            default: req_error <= 1'b1;
+                            // coverage: unreachable: req_kind is a valid enum (unique case)
+                            /* verilator coverage_off */ default: req_error <= 1'b1; /* verilator coverage_on */
                         endcase
                     end
                 end
@@ -182,7 +183,8 @@ module pipe7_mac_ctrl_fsm
                     end
                 end
 
-                default: state <= S_IDLE;
+                // coverage: unreachable defensive default (all states enumerated)
+                /* verilator coverage_off */ default: state <= S_IDLE; /* verilator coverage_on */
             endcase
         end
     end

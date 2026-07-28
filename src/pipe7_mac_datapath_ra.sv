@@ -140,7 +140,8 @@ module pipe7_mac_datapath_ra
                         drain_cnt <= 2'd0;
                     end
                 end
-                default: state <= DP_IDLE;
+                // coverage: unreachable defensive default (both states enumerated)
+                /* verilator coverage_off */ default: state <= DP_IDLE; /* verilator coverage_on */
             endcase
         end
     end

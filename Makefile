@@ -6,7 +6,7 @@
 .PHONY: all check ci clean cocotb coverage coverage_merge coverage_summary docs_check docs_pdf formal report report_check \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
-        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
+        verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
         verilator_msgbus verilator_nl1 vivado wave waves xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
@@ -80,6 +80,10 @@ BURST_DIR = obj_dir_burst
 W160_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) $(PERF_FILES) test/tb_pipe7_mac_bridge_w160.sv
 W160_TOP = tb_pipe7_mac_bridge_w160
 W160_DIR = obj_dir_w160
+# Item 42: bridge error-path coverage (sync_error on misaligned RX, rx_overflow on sink stall).
+BRIDGE_COV_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_mac_bridge_cov.sv
+BRIDGE_COV_TOP = tb_pipe7_mac_bridge_cov
+BRIDGE_COV_DIR = obj_dir_bridge_cov
 # Item 6: Gen6 (Rate=5) wide raw datapath + PAM4, composed with the ctrl FSM.
 GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
 GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
@@ -210,7 +214,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -270,6 +274,15 @@ verilator_framing:
 		--top-module $(FRAMING_TOP) --Mdir $(FRAMING_DIR) -o framing_sim $(FRAMING_FILES)
 	@echo "Running Verilator framing smoke..."
 	./$(FRAMING_DIR)/framing_sim
+
+# Item 42: bridge error-path coverage smoke (sync_error + rx_overflow).
+verilator_bridge_cov:
+	@echo "========== Verilator bridge error-path coverage smoke (item 42) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator"; exit 1; fi
+	rm -rf $(BRIDGE_COV_DIR)
+	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(BRIDGE_COV_TOP) --Mdir $(BRIDGE_COV_DIR) -o bcov_sim $(BRIDGE_COV_FILES)
+	@echo "Running..."
+	./$(BRIDGE_COV_DIR)/bcov_sim
 
 # Item 29: integrated bridge at width 160 -- validates the gearbox + burst-FIFO fold end-to-end.
 verilator_bridge_w160:
@@ -566,7 +579,7 @@ docs_check:
 	@grep -q "pipe7_mac_pkg" docs/uvm_verification.md || { echo "docs_check: uvm_verification.md must describe pipe7_mac_pkg"; exit 1; }
 	@grep -qi "coverage" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the coverage baseline"; exit 1; }
 	@# Item 25 sign-off: the docs must describe the INTEGRATED IP + all-tier verification.
-	@grep -q "628/667" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the DUT coverage baseline (628/667)"; exit 1; }
+	@grep -q "651/662" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the DUT coverage baseline (651/662)"; exit 1; }
 	@grep -q "## Performance / KPIs" docs/verification_plan.md || { echo "docs_check: verification_plan.md must have a Performance / KPIs section (item 39)"; exit 1; }
 	@grep -q '```mermaid' docs/architecture.md || { echo "docs_check: architecture.md must include mermaid block diagrams (item 39)"; exit 1; }
 	@grep -qi "integrated" docs/architecture.md || { echo "docs_check: architecture.md must describe the integrated bridge top"; exit 1; }
@@ -602,7 +615,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(DEFRAMER_GB_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(DEFRAMER_GB_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(BRIDGE_COV_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
 	rm -rf obj_dir_covmerge
 	rm -f coverage.info
 	rm -rf $(REPORT_DIR)

@@ -11,6 +11,7 @@ obj_dir_deframer_gb_ovf/
 obj_dir_timeout/
 obj_dir_burst/
 obj_dir_w160/
+obj_dir_bridge_cov/
 obj_dir_rate_dp/
 obj_dir_rdi/
 obj_dir_cdc/

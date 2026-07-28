@@ -179,7 +179,8 @@ module pipe7_msgbus_master
                     state       <= S_IDLE;
                 end
 
-                default: state <= S_IDLE;
+                // coverage: unreachable defensive default (all states enumerated)
+                /* verilator coverage_off */ default: state <= S_IDLE; /* verilator coverage_on */
             endcase
         end
     end
