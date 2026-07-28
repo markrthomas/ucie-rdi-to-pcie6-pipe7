@@ -24,7 +24,78 @@ Verilator / PyUVM / UVM / formal tiers) are delivered, with the Verilator gate g
 - **Rates:** Gen5 + Gen6 only (no legacy Gen1–4 ladder).
 - **FEC / flit-LCRC:** controller/RDI-side, not implemented at the PIPE interface.
 
+## Architecture
+
+**Architecture block diagram** — the bridge plays the PIPE MAC/controller role between two clock
+domains: the UCIe RDI controller side (`rdi_clk`) and the PIPE 7.1 PHY side (`pclk`). Three planes
+cross the boundary — a credit-based dataplane, an 8-bit M2P/P2M message bus, and the
+PhyStatus-gated control handshake.
+
+```mermaid
+flowchart LR
+  subgraph RDI["UCIe controller side · rdi_clk ≈ 71 MHz"]
+    TXF["RDI TX flits + credits"]
+    RXF["RDI RX flits + credits"]
+  end
+  subgraph BR["ucie_rdi_to_pipe7_mac_bridge · MAC role · dual-clock"]
+    direction TB
+    DPL["Dataplane<br/>flits ↔ Gen5/Gen6 blocks"]
+    CTL["Control + message-bus plane"]
+  end
+  subgraph PHY["PIPE 7.1 PHY side · pclk 100 MHz"]
+    SER["TxData / RxData<br/>(SerDes, async)"]
+    MB["M2P / P2M<br/>8-bit message bus"]
+    ST["PhyStatus · PowerDown / Rate / Width"]
+  end
+  TXF --> DPL
+  DPL --> RXF
+  DPL <-->|"TxData / RxData"| SER
+  CTL <--> MB
+  CTL <--> ST
+```
+
+**Design block diagram** — the shipped `src/` modules. The dataplane is a credit-gated,
+dual-clock pipeline (RDI↔PCLK CDC via `pipe7_cdc_elastic_buf`); the rate-aware datapath muxes the
+Gen5 full-width gearbox against the Gen6 raw plane by `Rate`, and a burst FIFO absorbs the
+0/1/2-blocks-per-`pclk` RX bursts. The control plane is watchdog-bounded and writes committed
+register state through to the Gen6 datapath.
+
+```mermaid
+flowchart LR
+  subgraph DP["Dataplane (rdi_clk ─ pclk)"]
+    direction LR
+    ING["pipe7_rdi_ingress<br/>(credit FC)"] --> TXC["tx CDC<br/>cdc_elastic_buf"]
+    TXC --> DRA["pipe7_mac_datapath_ra"]
+    DRA -->|"Gen5"| FGB["pipe7_tx_framer_gb /<br/>rx_deframer_gb"]
+    DRA -->|"Gen6"| G6["pipe7_gen6_datapath"]
+    DRA --> TXD(["TxData → PHY"])
+    RXD(["PHY → RxData"]) --> DRA
+    DRA --> BF["pipe7_rx_burst_fifo<br/>(0/1/2 blk/cyc)"]
+    BF --> RXC["rx CDC<br/>cdc_elastic_buf"]
+    RXC --> EG["pipe7_rdi_egress<br/>(credit FC)"]
+  end
+  subgraph CP["Control + message-bus plane (pclk)"]
+    direction TB
+    FSM["pipe7_mac_ctrl_fsm<br/>(PhyStatus-gated, +watchdog)"]
+    MBM["pipe7_msgbus_master<br/>(+watchdog)"] --> RF["pipe7_regfile"]
+  end
+  FSM -.->|"Rate / Width"| DRA
+  RF -.->|"PAM4RestrictedLevels"| G6
+```
+
+See [`docs/architecture.md`](docs/architecture.md) for the clock-domain, datapath, and
+control-plane detail behind these diagrams.
+
 ## Verification
+
+**Coverage at a glance** (current baselines; `make report` regenerates them):
+
+| Metric | Tool / engine | Result |
+|--------|---------------|-------:|
+| DUT line coverage | Verilator, `src/` union across the smoke suite | **651 / 662 = 98.34 %** |
+| Functional coverage | `cocotb_coverage` on Icarus (independent engine + tool) | **45 / 45 = 100 %** |
+| Formal proofs | SymbiYosys (BMC + cover) | **8 / 8 pass** |
+| PyUVM cross-checks | cocotb (Verilator + Icarus) | **5 / 5 pass** |
 
 Two-tier, mirroring the predecessor's methodology:
 
