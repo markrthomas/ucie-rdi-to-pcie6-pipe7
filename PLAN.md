@@ -425,14 +425,27 @@ absorption folded into the top; `pipe7_rx_burst_fifo`; validated at width 80 **a
 30 (PAM4RestrictedLevels write-through to the Gen6 datapath; PIPE_WIDTH compile-parameterized,
 validated at 80/160 — **runtime** sub-width lane selection deferred as a datapath refinement),
 31 (real-RTL formal via yosys-slang: `deframer_rtl` binds the item-27 guard proof to the shipped
-`pipe7_rx_deframer.sv`; the slang flow is established for re-targeting the rest). 33 (RDI ingress credit FC no-overflow proof). 32 (true dual-clock CDC multiclock formal on the real RTL via slang + CDC/reset-sync SDC constraints). 34 (directed error-path stimulus in the coverage smoke; re-baselined line coverage to 759/891 with item-29 RTL growth). 35 (regfile write-through so PAM4 comes from the real register file; removed the dead placeholder + dummy-wire waivers; remaining waivers are documented structural tie-offs, no behavioral ones).
+`pipe7_rx_deframer.sv`; the slang flow is established for re-targeting the rest). 33 (RDI ingress credit FC no-overflow proof). 32 (true dual-clock CDC multiclock formal on the real RTL via slang + CDC/reset-sync SDC constraints). 34 (directed error-path stimulus in the coverage smoke; re-baselined line coverage to 759/891 with item-29 RTL growth — *later superseded, see Phase F*). 35 (regfile write-through so PAM4 comes from the real register file; removed the dead placeholder + dummy-wire waivers; remaining waivers are documented structural tie-offs, no behavioral ones).
 
 **Phase E — performance metrics, reporting & KPI docs (delivered):** 36 (bound `pipe7_perf_monitor`
 emitting a machine-readable `[PERF]` line: throughput/latency/occupancy/backpressure). 37
 (`scripts/gen_report.py` + `make report` → `report/{metrics.json,report.md,report.html}`; coverage
-switched to DUT-only `src/` = 563/667). 38 (CI `report` job: artifact + step-summary; advisory
-`make report_check` threshold gate). 39 (Performance/KPI section + mermaid block diagrams in the
-docs; `docs_check` guards).
+switched to DUT-only `src/` = 563/667 — *later superseded, see Phase F*). 38 (CI `report` job:
+artifact + step-summary; advisory `make report_check` threshold gate). 39 (Performance/KPI section
++ mermaid block diagrams in the docs; `docs_check` guards).
+
+**Phase F — coverage closure to >98% (delivered):** 40 (`make coverage_merge`: union the DUT
+`src/` line coverage across the whole smoke suite — each contributing smoke built with
+`--coverage`, per-smoke `.dat` merged via `verilator_coverage`, instead of measuring from the
+single integrated smoke; 84.4% → 94.15%). 41 (directed error-path tests: ctrl-FSM rate /
+PCLK-input / committed-write msgbus watchdogs in `tb_pipe7_timeout.sv`, and `tb_pipe7_deframer_gb_ovf.sv`
+driving sustained garbage through `pipe7_rx_deframer_gb` to cover the bit-slip re-hunt + item-27
+flush guard; → 96.70%). 42 (`tb_pipe7_mac_bridge_cov.sv`: misaligned-RX `sync_error` + sink-stall
+`rx_overflow` paths, plus justified bare `verilator coverage_off` on the five unreachable defensive
+`default:` arms of the `unique case` FSMs; → **651/662 = 98.34% DUT line coverage**, the current
+recorded baseline). Remaining ~11 uncovered lines are documented non-executable: config-dead ports
+(`PCLK_IS_PHY_INPUT=0`), intentional tie-offs, Gen6-RX-through-bridge (covered standalone by the
+`gen6` smoke + cocotb `test_gen6_rx`), and one function-return line Verilator mis-attributes.
 
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI

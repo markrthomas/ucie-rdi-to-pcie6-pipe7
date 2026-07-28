@@ -171,7 +171,7 @@ def build_metrics(perf, tags, cov, formal, cocotb, sha):
 
 
 def build_md(m, cov, formal, cocotb, tags, perf):
-    L = [f"# UCIe RDI ↔ PIPE 7.1 bridge — metrics report",
+    L = ["# UCIe RDI ↔ PIPE 7.1 bridge — metrics report",
          "",
          f"_Generated {m['generated']} · commit `{m['git_sha']}` · {m['note']}._", ""]
     rows, _ = kpi_rows(perf)
@@ -213,9 +213,9 @@ def build_html(m, cov, formal, cocotb, tags, perf):
          f'<code>{html.escape(m["git_sha"])}</code><br>{html.escape(m["note"])}</p>']
     if rows:
         cards = "".join(
-            f'<div class="card"><div class="k">{html.escape(l)}</div>'
+            f'<div class="card"><div class="k">{html.escape(label)}</div>'
             f'<div class="v">{v}<small> {html.escape(u)}</small></div></div>'
-            for l, v, u, _ in rows)
+            for label, v, u, _ in rows)
         P.append(f'<h2>Performance KPIs <small>(width-160 run)</small></h2>'
                  f'<div class="cards">{cards}</div>')
     if cov:
