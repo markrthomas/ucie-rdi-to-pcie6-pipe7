@@ -209,6 +209,19 @@ and modules whose combinational logic is written in `int` (e.g. the gearbox `off
 still translate more reliably as the `reg`-typed re-models — so those keep their re-model proofs
 for now.
 
+## DV conventions
+
+- **Bounded, fail-fast waits — never silent spins or timeouts.** Every testbench wait on a
+  DUT condition (credit return, handshake completion, FIFO drain, alignment lock) carries an
+  explicit cycle bound. On hitting the bound the TB **fails immediately with a diagnostic that
+  names the stalled condition** (which credit/handshake did not advance, in which phase) rather
+  than spinning to a max-cycle guard or a harness timeout — a hang that runs to the guard hides
+  its own root cause. Per-phase logging (e.g. the `[FCOV] phase: …` lines) makes a stall point
+  at the phase that stalled. When a wait does trip, fix the **root cause**, not just the bound
+  (e.g. the fcov spin was the datapath left in Gen6 while the RDI round-trip only returns credits
+  in Gen5 — the fix committed Gen5 before the round-trip, and *also* made the source fail-fast).
+  This applies to the cocotb/PyUVM drivers and the self-clocking SV smokes alike.
+
 ## Exit criteria (per commit)
 
 - `make lint` clean (RTL + every TB/interface + the UVM DUT wiring).
