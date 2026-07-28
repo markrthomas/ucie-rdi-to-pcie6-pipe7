@@ -3,7 +3,7 @@
 # `make` (no target) prints the grouped target list below. Verilator is the OSS gate;
 # the PyUVM-on-Cocotb tier (`make cocotb`) and the VCS/UVM tier (`make uvm`) sit above it.
 
-.PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal report \
+.PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal report report_check \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
         verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
@@ -425,6 +425,11 @@ report:
 	-@$(MAKE) --no-print-directory formal            > $(REPORT_DIR)/logs/formal.log 2>&1
 	-@$(MAKE) --no-print-directory -C test/cocotb SIM=verilator all_tests > $(REPORT_DIR)/logs/cocotb.log 2>&1
 	@python3 scripts/gen_report.py --root $(CURDIR) --out $(CURDIR)/$(REPORT_DIR)
+
+# Item 38: perf/quality threshold gate over report/metrics.json. Advisory / opt-in -- run after
+# `make report`; NOT part of the required `ci` gate (a sim timing wobble must not red the build).
+report_check:
+	@python3 scripts/gen_report.py --check scripts/report_thresholds.json --out $(CURDIR)/$(REPORT_DIR)
 
 # Debug build of the integrated bridge smoke with waveform tracing (VCD at obj_dir/bridge.vcd).
 verilator_debug:

@@ -90,3 +90,48 @@ jobs:
       - name: PyUVM cross-checks (datapath + control-plane + message-bus, Verilator)
         working-directory: ${{ github.workspace }}
         run: make -C test/cocotb SIM=verilator all_tests
+
+  # Item 37/38: aggregate performance + coverage + smoke + formal + cocotb into one report
+  # (report/{metrics.json,report.md,report.html}), upload it as an artifact, and surface the KPI
+  # tables in the run's step-summary. The perf-threshold gate (report_check) runs ADVISORY here
+  # (continue-on-error) so a simulation timing wobble never reds the required gate; promote it to
+  # a hard gate by dropping continue-on-error once the baselines are stable.
+  report:
+    needs: [sim, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OSS CAD Suite (verilator, iverilog, sby)
+        uses: YosysHQ/setup-oss-cad-suite@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install cocotb + pyuvm + cocotb-coverage
+        run: pip install -r test/cocotb/requirements.txt
+
+      - name: Generate metrics report
+        working-directory: ${{ github.workspace }}
+        run: make report
+
+      - name: Publish KPI tables to the run summary
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: cat report/report.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload metrics report (json + md + html)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-report
+          path: report/
+          if-no-files-found: ignore
+
+      - name: Perf/quality threshold check (advisory)
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        run: make report_check

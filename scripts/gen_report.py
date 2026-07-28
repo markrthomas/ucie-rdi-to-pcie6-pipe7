@@ -266,13 +266,47 @@ code{{background:var(--card);padding:.05rem .3rem;border-radius:4px}}
 </body></html>"""
 
 
+# ---------------------------------------------------------------- threshold check
+def check_thresholds(out: Path, thresh_file: Path):
+    """Evaluate report/metrics.json against thresholds; exit 1 on any violation."""
+    mfile = out / "metrics.json"
+    if not mfile.exists():
+        print(f"[THRESH] no {mfile}; run `make report` first"); return 2
+    m = json.loads(mfile.read_text())
+    t = json.loads(thresh_file.read_text())
+    perf = m.get("performance") or {}
+    src = perf.get("pipe_width_160") or (next(iter(perf.values())) if perf else {})
+    cov_pct = (m.get("coverage") or {}).get("pct", 0.0)
+
+    checks = []  # (name, value, op, bound)
+    if "min_tx_util_pct" in t:  checks.append(("tx_util_pct", src.get("tx_util_pct", 0), ">=", t["min_tx_util_pct"]))
+    if "max_lat_ns_avg" in t:   checks.append(("lat_ns_avg",  src.get("lat_ns_avg", 1e9), "<=", t["max_lat_ns_avg"]))
+    if "max_rx_overflow" in t:  checks.append(("rx_overflow", src.get("rx_overflow", 1e9), "<=", t["max_rx_overflow"]))
+    if "min_coverage_pct" in t: checks.append(("coverage_pct", cov_pct, ">=", t["min_coverage_pct"]))
+
+    fails = 0
+    for name, val, op, bound in checks:
+        ok = (val >= bound) if op == ">=" else (val <= bound)
+        fails += not ok
+        print(f"[THRESH] {'PASS' if ok else 'FAIL'}  {name}={val} {op} {bound}")
+    if fails:
+        print(f"[THRESH] {fails} threshold(s) violated")
+    else:
+        print(f"[THRESH] all {len(checks)} thresholds met")
+    return 1 if fails else 0
+
+
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
     ap.add_argument("--out", default="report")
+    ap.add_argument("--check", metavar="THRESHOLDS_JSON",
+                    help="evaluate <out>/metrics.json against a thresholds file and exit nonzero on violation")
     a = ap.parse_args()
     root, out = Path(a.root).resolve(), Path(a.out).resolve()
+    if a.check:
+        raise SystemExit(check_thresholds(out, Path(a.check)))
     logs = out / "logs"
     out.mkdir(parents=True, exist_ok=True)
 

@@ -1,0 +1,7 @@
+{
+  "_comment": "Perf/quality thresholds for `make report_check` (closure-plan item 38). Advisory / opt-in first -- not wired into the required CI gate, so a simulation timing wobble never reds the build. Baselines at authoring: tx_util ~20%, lat_ns_avg ~330, rx_overflow 0, DUT coverage 84.4%. Bounds keep margin.",
+  "min_tx_util_pct": 12.0,
+  "max_lat_ns_avg": 600.0,
+  "max_rx_overflow": 0,
+  "min_coverage_pct": 80.0
+}
