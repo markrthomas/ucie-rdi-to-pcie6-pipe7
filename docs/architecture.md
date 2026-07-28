@@ -32,6 +32,53 @@ crosses RDI↔PCLK with pointer-only synchronization (no combinational data path
 | `pipe7_msgbus_master` + `pipe7_regfile` | 8-bit M2P/P2M message-bus master (read = 2 cyc, write = 3 cyc; read_completion / write_ack) + MAC-side register file. |
 | `ucie_rdi_to_pipe7_mac_bridge` | **Integrated top** (item 20): RDI ingress/egress (+credits) → RDI↔PCLK CDC → Gen5 128b/130b datapath (`TxElecIdle`-gated) → PIPE MAC, alongside the control FSM and the message-bus master/regfile. Dual-clock (`rdi_clk` + `pclk`). |
 
+## Block diagrams
+
+**Integrated dataplane** (RDI flits ↔ PIPE, credit-based, dual-clock):
+
+```mermaid
+flowchart LR
+  RDItx["RDI TX flits (rdi_clk)"] --> ING["pipe7_rdi_ingress (+credits)"]
+  ING --> TXCDC["tx CDC (rdi_clk to pclk)"]
+  TXCDC --> ADP["TX adapter"]
+  ADP --> DP["pipe7_mac_datapath_ra (Gen5 gearbox / Gen6 raw)"]
+  DP --> TXD["TxData / TxDataValid to PHY"]
+  PHYrx["PHY RxData"] --> DP
+  DP --> BF["pipe7_rx_burst_fifo (0/1/2 blk per cyc)"]
+  BF --> RXCDC["rx CDC (pclk to rdi_clk)"]
+  RXCDC --> EG["pipe7_rdi_egress (+credits)"]
+  EG --> RDIrx["RDI RX flits (rdi_clk)"]
+```
+
+**Control + message-bus plane** (gated on PhyStatus; watchdog-bounded; regfile write-through):
+
+```mermaid
+flowchart LR
+  REQ["control request"] --> FSM["pipe7_mac_ctrl_fsm (+watchdog)"]
+  FSM -->|"PowerDown / Rate / Width"| PHYa["PHY"]
+  PHYa -->|"PhyStatus"| FSM
+  MBREQ["register request"] --> MB["pipe7_msgbus_master (+watchdog)"]
+  MB -->|"M2P"| PHYb["PHY"]
+  PHYb -->|"P2M"| MB
+  MB -->|"committed write-through"| RF["pipe7_regfile"]
+  RF -->|"PAM4RestrictedLevels"| DPg["Gen6 datapath"]
+```
+
+**Metrics / reporting dataflow** (DV-only; `make report`):
+
+```mermaid
+flowchart LR
+  MON["pipe7_perf_monitor (bound)"] -->|"[PERF] line"| LOGS["regress.log"]
+  LOGS --> GEN["scripts/gen_report.py"]
+  COV["coverage.info"] --> GEN
+  XML["cocotb results.xml"] --> GEN
+  FRM["make formal log"] --> GEN
+  GEN --> JSON["metrics.json"]
+  GEN --> MD["report.md"]
+  GEN --> HTML["report.html"]
+  GEN --> CHK["report_check (thresholds)"]
+```
+
 ## Clock-domain crossing & reset
 
 The RDI (`rdi_clk`) and PIPE (`pclk`) domains are bridged by `pipe7_cdc_elastic_buf` (Gray-coded

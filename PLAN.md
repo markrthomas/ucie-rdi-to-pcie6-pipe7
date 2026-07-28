@@ -427,6 +427,13 @@ validated at 80/160 — **runtime** sub-width lane selection deferred as a datap
 31 (real-RTL formal via yosys-slang: `deframer_rtl` binds the item-27 guard proof to the shipped
 `pipe7_rx_deframer.sv`; the slang flow is established for re-targeting the rest). 33 (RDI ingress credit FC no-overflow proof). 32 (true dual-clock CDC multiclock formal on the real RTL via slang + CDC/reset-sync SDC constraints). 34 (directed error-path stimulus in the coverage smoke; re-baselined line coverage to 759/891 with item-29 RTL growth). 35 (regfile write-through so PAM4 comes from the real register file; removed the dead placeholder + dummy-wire waivers; remaining waivers are documented structural tie-offs, no behavioral ones).
 
+**Phase E — performance metrics, reporting & KPI docs (delivered):** 36 (bound `pipe7_perf_monitor`
+emitting a machine-readable `[PERF]` line: throughput/latency/occupancy/backpressure). 37
+(`scripts/gen_report.py` + `make report` → `report/{metrics.json,report.md,report.html}`; coverage
+switched to DUT-only `src/` = 563/667). 38 (CI `report` job: artifact + step-summary; advisory
+`make report_check` threshold gate). 39 (Performance/KPI section + mermaid block diagrams in the
+docs; `docs_check` guards).
+
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
     sink makes `dp_rx_valid` write a **full** `rx_cdc` and the block is silently dropped (today the

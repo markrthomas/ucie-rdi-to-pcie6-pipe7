@@ -105,7 +105,9 @@ via `make lint`.
 
 - **Line coverage** (`make regress_cov` → `coverage.info`; `make coverage_summary`): the
   instrumented flow now covers the **integrated-bridge end-to-end smoke**
-  (`tb_pipe7_mac_bridge`) — current baseline **~85% line** (759/891), up from the item-1
+  (`tb_pipe7_mac_bridge`) — current **DUT** baseline **~84% line** (563/667, `src/` only;
+  testbenches, stubs, the perf monitor, and the assertion module are verification code and are
+  excluded, item 37), up from the item-1
   datapath baseline (135/158). Remaining uncovered lines are error/edge branches (e.g. RX
   elastic-buffer overflow, message-bus error responses) exercised by the per-block self-checking
   Verilator smokes, the PyUVM cross-checks, and the authored UVM env rather than the single
@@ -113,6 +115,33 @@ via `make lint`.
 - **Functional coverage** (Tier 2 UVM, item 11): Rate×Width, PowerDown-state, framing-mode,
   message-bus-opcode, and PhyStatus-latency covergroups; percentages via `get_coverage()` in
   `report_phase`.
+
+## Performance / KPIs
+
+A passive perf monitor (`test/pipe7_perf_monitor.sv`, `bind`-attached to the bridge, item 36)
+emits a machine-readable `[PERF]` line from the integrated smokes; `make report` (item 37)
+aggregates the KPIs + coverage + smoke/formal/cocotb status into
+`report/{metrics.json, report.md, report.html}`, and `make report_check` (item 38) gates them
+against `scripts/report_thresholds.json`. **All figures are simulation numbers at the smoke
+operating point (rdi_clk ≈ 71 MHz / pclk 100 MHz), not silicon timing.**
+
+| KPI | Definition | Source | Baseline | Threshold |
+|-----|-----------|--------|---------:|----------:|
+| TX PIPE utilization | `tx_data_valid` cycles / pclk cycles | `[PERF] tx_util_pct` | ~20 % | ≥ 12 % |
+| Effective throughput | recovered RDI bits / pclk-ns | `[PERF] gbps_eff` | ~2.6 Gbit/s (w160) | — |
+| RDI bits / PCLK | recovered flit-bits per pclk cycle | `[PERF] bits_per_pclk` | ~26 (w160) | — |
+| Round-trip latency (avg) | RDI-in → RDI-out, timestamp queue | `[PERF] lat_ns_avg` | ~330 ns | ≤ 600 ns |
+| Round-trip latency (max) | worst RDI-in → RDI-out | `[PERF] lat_ns_max` | ~476 ns | — |
+| RX burst-FIFO peak | max recovered blocks buffered | `[PERF] burst_fifo_peak` | 2 (w160) | — |
+| Peak credits outstanding | max in-flight egress credits | `[PERF] egress_peak_outstanding` | 1 | — |
+| RX overflow drops | recovered blocks dropped (in-envelope) | `[PERF] rx_overflow` | 0 | 0 |
+| TX-CDC stall cycles | cycles TX CDC full | `[PERF] tx_stall_cyc` | 0 | — |
+| DUT line coverage | `src/` lines hit | `coverage.info` | 563/667 = 84.4 % | ≥ 80 % |
+| Formal proofs | BMC + cover PASS | `make formal` | 8/8 | 8/8 |
+
+The threshold gate is **advisory / opt-in** (runs `continue-on-error` in CI) so a simulation
+timing wobble never reds the required gate; promote it to a hard gate once the baselines are
+stable.
 
 ## Formal
 
