@@ -23,7 +23,9 @@ BRIDGE_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_msgbus_master.
              src/pipe7_rdi_egress.sv src/ucie_rdi_to_pipe7_mac_bridge.sv
 VERILOG_RTL = $(BRIDGE_RTL)
 BRIDGE_STUBS = test/pipe7_phy_responder_stub.sv test/pipe7_msgbus_responder_stub.sv
-VERILOG_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/pipe7_mac_bridge_assertions.sv test/tb_pipe7_mac_bridge.sv
+# Item 36: passive perf monitor bound into the bridge (emits a [PERF] line). DV-only.
+PERF_FILES = test/pipe7_perf_monitor.sv test/pipe7_perf_bind.sv
+VERILOG_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) $(PERF_FILES) test/pipe7_mac_bridge_assertions.sv test/tb_pipe7_mac_bridge.sv
 TOP_MODULE = tb_pipe7_mac_bridge
 TOP_SIMV = sim_top
 VERILOG_SIMV = test/sim_top.sv $(VERILOG_RTL)
@@ -70,7 +72,7 @@ BURST_FILES = $(BURST_RTL) test/tb_pipe7_rx_burst_fifo.sv
 BURST_TOP = tb_pipe7_rx_burst_fifo
 BURST_DIR = obj_dir_burst
 # Item 29: integrated bridge at PIPE_WIDTH=160 (gearbox + burst-FIFO fold).
-W160_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_mac_bridge_w160.sv
+W160_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) $(PERF_FILES) test/tb_pipe7_mac_bridge_w160.sv
 W160_TOP = tb_pipe7_mac_bridge_w160
 W160_DIR = obj_dir_w160
 # Item 6: Gen6 (Rate=5) wide raw datapath + PAM4, composed with the ctrl FSM.
