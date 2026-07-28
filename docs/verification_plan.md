@@ -103,15 +103,14 @@ via `make lint`.
 
 ## Coverage
 
-- **Line coverage** (`make regress_cov` → `coverage.info`; `make coverage_summary`): the
-  instrumented flow now covers the **integrated-bridge end-to-end smoke**
-  (`tb_pipe7_mac_bridge`) — current **DUT** baseline **~84% line** (563/667, `src/` only;
-  testbenches, stubs, the perf monitor, and the assertion module are verification code and are
-  excluded, item 37), up from the item-1
-  datapath baseline (135/158). Remaining uncovered lines are error/edge branches (e.g. RX
-  elastic-buffer overflow, message-bus error responses) exercised by the per-block self-checking
-  Verilator smokes, the PyUVM cross-checks, and the authored UVM env rather than the single
-  end-to-end smoke.
+- **Line coverage** (`make coverage_merge` → `coverage.info`; `make coverage_summary`): the
+  **union** across the whole Verilator smoke suite (each smoke built with `--coverage`, the
+  per-smoke `coverage.dat` merged, item 40) — current **DUT** baseline **~94% line** (628/667,
+  `src/` only; testbenches, stubs, the perf monitor, and the assertion module are verification
+  code and are excluded). The single integrated-bridge smoke alone covers only the Gen5 path
+  (~84%); the standalone smokes add Gen6, the gearbox bursts, every FSM transition, all
+  message-bus opcodes, and the watchdogs. Remaining uncovered lines are error-path and
+  intentionally-unreachable defensive branches, driven toward &gt;98% by items 41–42.
 - **Functional coverage** (Tier 2 UVM, item 11): Rate×Width, PowerDown-state, framing-mode,
   message-bus-opcode, and PhyStatus-latency covergroups; percentages via `get_coverage()` in
   `report_phase`.
@@ -136,7 +135,7 @@ operating point (rdi_clk ≈ 71 MHz / pclk 100 MHz), not silicon timing.**
 | Peak credits outstanding | max in-flight egress credits | `[PERF] egress_peak_outstanding` | 1 | — |
 | RX overflow drops | recovered blocks dropped (in-envelope) | `[PERF] rx_overflow` | 0 | 0 |
 | TX-CDC stall cycles | cycles TX CDC full | `[PERF] tx_stall_cyc` | 0 | — |
-| DUT line coverage | `src/` lines hit | `coverage.info` | 563/667 = 84.4 % | ≥ 80 % |
+| DUT line coverage | `src/` lines hit | `coverage.info` | 628/667 = 94.2 % | ≥ 80 % |
 | Formal proofs | BMC + cover PASS | `make formal` | 8/8 | 8/8 |
 
 The threshold gate is **advisory / opt-in** (runs `continue-on-error` in CI) so a simulation

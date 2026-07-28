@@ -55,4 +55,5 @@ NOTES.md
 # Editor / OS
 *.swp
 .DS_Store
+obj_dir_covmerge/
 report/
