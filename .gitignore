@@ -55,3 +55,4 @@ NOTES.md
 # Editor / OS
 *.swp
 .DS_Store
+report/

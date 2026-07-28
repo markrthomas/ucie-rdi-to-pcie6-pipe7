@@ -3,7 +3,7 @@
 # `make` (no target) prints the grouped target list below. Verilator is the OSS gate;
 # the PyUVM-on-Cocotb tier (`make cocotb`) and the VCS/UVM tier (`make uvm`) sit above it.
 
-.PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal \
+.PHONY: all check ci clean cocotb coverage coverage_summary docs_check docs_pdf formal report \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
         verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
@@ -408,8 +408,23 @@ coverage_summary:
 		echo "coverage.info not found; run 'make regress_cov' first"; \
 		exit 1; \
 	fi
-	@awk 'BEGIN{lines=0;hit=0} /^DA:/ {split($$0,a,":"); split(a[2],b,","); lines++; if (b[2] > 0) hit++} END{printf "Line coverage: %d/%d = %.2f%%\n", hit, lines, (lines?100*hit/lines:0)}' coverage.info
-	@awk 'function flush(){if(file != ""){printf "  %-55s %4d/%-4d %6.2f%%\n", file, hit, lines, (lines?100*hit/lines:0)}} /^SF:/ {flush(); file=substr($$0,4); lines=0; hit=0} /^DA:/ {split($$0,a,":"); split(a[2],b,","); lines++; if (b[2] > 0) hit++} END{flush()}' coverage.info
+	@# DUT line coverage: count src/ (the design) only -- testbenches, stubs, the perf monitor,
+	@# and the assertion module are verification code, not the DUT, so they are excluded.
+	@awk 'BEGIN{lines=0;hit=0} /^SF:/{inc=($$0 ~ /:src\//)} inc&&/^DA:/ {split($$0,a,":"); split(a[2],b,","); lines++; if (b[2] > 0) hit++} END{printf "DUT line coverage (src/): %d/%d = %.2f%%\n", hit, lines, (lines?100*hit/lines:0)}' coverage.info
+	@awk 'function flush(){if(file != ""){printf "  %-55s %4d/%-4d %6.2f%%\n", file, hit, lines, (lines?100*hit/lines:0)}} /^SF:/ {flush(); inc=($$0 ~ /:src\//); file=(inc?substr($$0,4):""); lines=0; hit=0} inc&&/^DA:/ {split($$0,a,":"); split(a[2],b,","); lines++; if (b[2] > 0) hit++} END{flush()}' coverage.info
+
+# Item 37: aggregate perf + coverage + smoke + formal + cocotb into report/{metrics.json,
+# report.md,report.html}. Sub-steps tolerate failure (-) so the report always generates and
+# reflects the actual state; the [PERF] lines come from the bridge/w160 smokes in regress.
+REPORT_DIR = report
+report:
+	@echo "========== Metrics report (item 37) =========="
+	@mkdir -p $(REPORT_DIR)/logs
+	-@$(MAKE) --no-print-directory regress          > $(REPORT_DIR)/logs/regress.log 2>&1
+	-@$(MAKE) --no-print-directory verilator_cov     > $(REPORT_DIR)/logs/coverage.log 2>&1
+	-@$(MAKE) --no-print-directory formal            > $(REPORT_DIR)/logs/formal.log 2>&1
+	-@$(MAKE) --no-print-directory -C test/cocotb SIM=verilator all_tests > $(REPORT_DIR)/logs/cocotb.log 2>&1
+	@python3 scripts/gen_report.py --root $(CURDIR) --out $(CURDIR)/$(REPORT_DIR)
 
 # Debug build of the integrated bridge smoke with waveform tracing (VCD at obj_dir/bridge.vcd).
 verilator_debug:
@@ -562,6 +577,7 @@ clean:
 	@echo "========== Cleaning simulation files =========="
 	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
 	rm -f coverage.info
+	rm -rf $(REPORT_DIR)
 	rm -f waves/*.vcd
 	rm -rf csrc simv simv.daidir DVEdir coverage.db *.vcd *.wdb *.fsdb
 	rm -rf xsim.dir transcript xsim_*.log
