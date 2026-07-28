@@ -33,6 +33,7 @@ SMOKES=(
   "cdc      CDC_TOP         CDC_FILES         "
   "timeout  TIMEOUT_TOP     TIMEOUT_FILES     "
   "burst    BURST_TOP       BURST_FILES       "
+  "dgbovf   DEFRAMER_GB_OVF_TOP  DEFRAMER_GB_OVF_FILES  "
 )
 
 for entry in "${SMOKES[@]}"; do

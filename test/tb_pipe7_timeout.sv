@@ -41,6 +41,21 @@ module tb_pipe7_timeout;
         .phy_status, .pclk_change_ok
     );
 
+    // ---- Second control FSM in PCLK-as-PHY-input mode: exercises the PclkChangeOk wait
+    //      (S_RW_WAIT_OK) and its watchdog. Shares the request/status stimulus. ----
+    logic       c2_busy, c2_done, c2_req_error;
+    logic [3:0] c2_pd, c2_rate; logic [2:0] c2_w, c2_rxw; logic [3:0] c2_ei;
+    logic       c2_rx_standby, c2_pclk_ack;
+    pipe7_mac_ctrl_fsm #(.TIMEOUT_CYCLES(TO), .PCLK_IS_PHY_INPUT(1'b1)) ctrl_pi (
+        .pclk(clk), .reset_n,
+        .req_valid(c_req_valid), .req_kind(c_req_kind), .req_power_down(c_req_pd),
+        .req_rate(c_req_rate), .req_width(c_req_w), .req_rxwidth(c_req_rxw),
+        .busy(c2_busy), .done(c2_done), .req_error(c2_req_error),
+        .power_down(c2_pd), .rate(c2_rate), .width(c2_w), .rx_width(c2_rxw),
+        .tx_elec_idle(c2_ei), .rx_standby(c2_rx_standby), .pclk_change_ack(c2_pclk_ack),
+        .phy_status, .pclk_change_ok
+    );
+
     // ---- Message-bus master ----
     logic       m_req_valid, m_req_write, m_req_committed;
     logic [MB_ADDR_WIDTH-1:0] m_req_addr; logic [MB_DATA_WIDTH-1:0] m_req_wdata;
@@ -123,6 +138,35 @@ module tb_pipe7_timeout;
             wait_pulse(m_rsp_valid, 12, seen);
             if (!seen)         begin errors++; $display("[TIMEOUT] FAIL: uncommitted write did not complete"); end
             else if (m_rsp_error) begin errors++; $display("[TIMEOUT] FAIL: normal write flagged rsp_error"); end
+        end
+
+        // ---- Control watchdog on a Rate change: phy_status stuck -> req_error (S_RW_APPLY_WAIT) ----
+        begin
+            bit seen;
+            @(negedge clk); c_req_kind = REQ_RATE; c_req_pd = PD_P0; c_req_rate = RATE_GEN6; c_req_valid = 1;
+            @(negedge clk); c_req_valid = 0;
+            wait_pulse(c_req_error, TO + 10, seen);
+            if (!seen) begin errors++; $display("[TIMEOUT] FAIL: rate-change watchdog never fired"); end
+        end
+
+        // ---- Message-bus watchdog on a committed write: p2m stuck -> rsp_error (S_WACK_WAIT) ----
+        begin
+            bit seen;
+            @(negedge clk); m_req_write = 1; m_req_committed = 1; m_req_addr = 12'h403;
+            m_req_wdata = 8'h7E; m_req_valid = 1;
+            @(negedge clk); m_req_valid = 0;
+            wait_pulse(m_rsp_valid, TO + 12, seen);
+            if (!seen)             begin errors++; $display("[TIMEOUT] FAIL: committed-write watchdog never completed"); end
+            else if (!m_rsp_error) begin errors++; $display("[TIMEOUT] FAIL: committed-write timeout without rsp_error"); end
+        end
+
+        // ---- PCLK-as-PHY-input FSM: Rate change with pclk_change_ok stuck -> req_error (S_RW_WAIT_OK) ----
+        begin
+            bit seen;
+            @(negedge clk); c_req_kind = REQ_RATE; c_req_pd = PD_P0; c_req_rate = RATE_GEN6; c_req_valid = 1;
+            @(negedge clk); c_req_valid = 0;
+            wait_pulse(c2_req_error, TO + 10, seen);
+            if (!seen) begin errors++; $display("[TIMEOUT] FAIL: PCLK-input rate watchdog never fired"); end
         end
 
         repeat (4) @(negedge clk);
