@@ -228,6 +228,11 @@ help:
 	@echo "  make uvm               VCS/UVM compile+run (test/uvm; not in OSS CI)"
 	@echo "  make uvm_compile | uvm_run | uvm_pdf"
 	@echo ""
+	@echo "Metrics & reporting:"
+	@echo "  make report            regress+coverage+formal+cocotb+fcov -> report/{metrics.json,report.md,report.html}"
+	@echo "  make report_check      advisory perf/quality threshold gate over report/metrics.json"
+	@echo "  make fcov              independent functional coverage (Icarus/cocotb_coverage); gates >= FCOV_MIN%"
+	@echo ""
 	@echo "Formal, docs, vendor sims, utility:"
 	@echo "  make formal            SymbiYosys CDC/FSM proofs (verification/formal)"
 	@echo "  make docs_check        required-docs + stale-claim gate"
@@ -235,7 +240,7 @@ help:
 	@echo "  make repo_status       git status --short"
 	@echo "  make clean             remove all build artifacts"
 	@echo ""
-	@echo "  Variables: WAVE_TB (waveform TB), COCOTB_SIM, VERILATOR"
+	@echo "  Variables: WAVE_TB (waveform TB), COCOTB_SIM, VERILATOR, SEED, FCOV_MIN"
 
 # ============================ Workflow aliases ============================
 all: verilator
