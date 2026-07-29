@@ -250,6 +250,9 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
+# Pin the randomized rnd_* TBs to seed 0 for a deterministic gate (target-specific SEED,
+# inherited by the prerequisites); standalone runs + waves keep the SEED?=49 default.
+regress: SEED := 0
 regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ verilator_rnd_data verilator_rnd_data_err verilator_rnd_nondata_err verilator_rnd_all
 
 # Full local confidence run (heavier than CI's first gate).
