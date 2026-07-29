@@ -537,12 +537,19 @@ coverage_merge:
 REPORT_DIR = report
 report:
 	@echo "========== Metrics report (item 37) =========="
+	@echo "  (each stage runs into report/logs/<stage>.log -- minutes, not a hang)"
 	@mkdir -p $(REPORT_DIR)/logs
+	@echo "[report] 1/5 regress          (full Verilator smoke suite) ..."
 	-@$(MAKE) --no-print-directory regress          > $(REPORT_DIR)/logs/regress.log 2>&1
+	@echo "[report] 2/5 coverage_merge   (--coverage rebuild of every smoke) ..."
 	-@$(MAKE) --no-print-directory coverage_merge      > $(REPORT_DIR)/logs/coverage.log 2>&1
+	@echo "[report] 3/5 formal           (SymbiYosys proofs) ..."
 	-@$(MAKE) --no-print-directory formal            > $(REPORT_DIR)/logs/formal.log 2>&1
+	@echo "[report] 4/5 cocotb           (PyUVM/Verilator cross-check) ..."
 	-@$(MAKE) --no-print-directory -C test/cocotb SIM=verilator all_tests > $(REPORT_DIR)/logs/cocotb.log 2>&1
+	@echo "[report] 5/5 fcov             (Icarus functional coverage) ..."
 	-@$(MAKE) --no-print-directory fcov                > $(REPORT_DIR)/logs/fcov.log 2>&1
+	@echo "[report] aggregating -> report/{metrics.json,report.md,report.html}"
 	@python3 scripts/gen_report.py --root $(CURDIR) --out $(CURDIR)/$(REPORT_DIR)
 
 # Item 38: perf/quality threshold gate over report/metrics.json. Advisory / opt-in -- run after
