@@ -1,0 +1,54 @@
+[*]
+[*] GTKWave save file — tb_pipe7_rnd_data_err : randomized data-with-errors (Phase H item 47)
+[*] Open via:  make gtkwave WAVE_TB=rnd_data_err [SEED=N]
+[*]
+[dumpfile] "rnd_data_err.vcd"
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 280
+[signals_width] 340
+[sst_expanded] 1
+@200
+-Clocks / Reset
+@28
+tb_pipe7_rnd_data_err.pclk
+tb_pipe7_rnd_data_err.rdi_clk
+tb_pipe7_rnd_data_err.rst_n
+@200
+-Fault injection knobs
+@28
+tb_pipe7_rnd_data_err.inject_en
+tb_pipe7_rnd_data_err.sink_stall
+@22
+tb_pipe7_rnd_data_err.inject_data[79:0]
+@200
+-PIPE stream  (bridge <-> PHY, garbage muxed in on inject_en)
+@28
+tb_pipe7_rnd_data_err.tx_data_valid
+@22
+tb_pipe7_rnd_data_err.tx_data[79:0]
+tb_pipe7_rnd_data_err.rx_data[79:0]
+@200
+-Error flags / datapath status
+@28
+tb_pipe7_rnd_data_err.block_locked
+tb_pipe7_rnd_data_err.sync_error
+tb_pipe7_rnd_data_err.in_data_phase
+tb_pipe7_rnd_data_err.rx_overflow
+@200
+-RDI TX / RX flits
+@28
+tb_pipe7_rnd_data_err.rdi_tx_valid
+tb_pipe7_rnd_data_err.rdi_rx_valid
+@22
+tb_pipe7_rnd_data_err.rdi_rx_data[63:0]
+tb_pipe7_rnd_data_err.rdi_rx_crd[1:0]
+@200
+-Scoreboard
+@23
+tb_pipe7_rnd_data_err.sync_err_seen
+tb_pipe7_rnd_data_err.ovf_seen
+tb_pipe7_rnd_data_err.flits_out
+[pattern_trace] 1
+[pattern_trace] 0
