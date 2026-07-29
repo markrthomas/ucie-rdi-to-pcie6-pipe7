@@ -100,6 +100,10 @@ RND_DATA_ERR_DIR = obj_dir_rnd_data_err
 RND_NONDATA_ERR_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_rnd_nondata_err.sv
 RND_NONDATA_ERR_TOP = tb_pipe7_rnd_nondata_err
 RND_NONDATA_ERR_DIR = obj_dir_rnd_nondata_err
+# item 49: all-in-one -- interleaves data + datapath faults + control/msgbus faults; NO --assert.
+RND_ALL_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_rnd_all.sv
+RND_ALL_TOP = tb_pipe7_rnd_all
+RND_ALL_DIR = obj_dir_rnd_all
 # Item 6: Gen6 (Rate=5) wide raw datapath + PAM4, composed with the ctrl FSM.
 GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
 GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
@@ -172,6 +176,9 @@ else ifeq ($(WAVE_TB),rnd_data_err)
 else ifeq ($(WAVE_TB),rnd_nondata_err)
     WAVE_FILES = $(RND_NONDATA_ERR_FILES)
     WAVE_TOP   = $(RND_NONDATA_ERR_TOP)
+else ifeq ($(WAVE_TB),rnd_all)
+    WAVE_FILES = $(RND_ALL_FILES)
+    WAVE_TOP   = $(RND_ALL_TOP)
 else
     WAVE_FILES = $(FRAMING_FILES)
     WAVE_TOP   = $(FRAMING_TOP)
@@ -203,7 +210,7 @@ help:
 	@echo "  make verilator_integ   integrated EI-gated datapath + control + assertions bound"
 	@echo ""
 	@echo "Waveforms (GTKWave):"
-	@echo "  make waves   [WAVE_TB=framing|ctrl|msgbus|gen6|assn|integ]"
+	@echo "  make waves   [WAVE_TB=framing|ctrl|msgbus|gen6|assn|integ|rnd_data|rnd_data_err|rnd_nondata_err|rnd_all] [SEED=N]"
 	@echo "                         build+run the TB with --trace -> waves/<tb>.vcd"
 	@echo "  make gtkwave [WAVE_TB=...]"
 	@echo "                         waves, then open GTKWave with the waves/<tb>.gtkw layout"
@@ -243,7 +250,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ verilator_rnd_data verilator_rnd_data_err verilator_rnd_nondata_err
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ verilator_rnd_data verilator_rnd_data_err verilator_rnd_nondata_err verilator_rnd_all
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -342,6 +349,17 @@ verilator_rnd_nondata_err:
 	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(RND_NONDATA_ERR_TOP) --Mdir $(RND_NONDATA_ERR_DIR) -o rnd_nondata_err_sim $(RND_NONDATA_ERR_FILES)
 	@echo "Running..."
 	./$(RND_NONDATA_ERR_DIR)/rnd_nondata_err_sim +seed=$(SEED)
+
+# Phase H (item 49): all-in-one -- one seeded run interleaving clean data traffic, datapath faults
+# (sync_error / rx_overflow) and control/msgbus faults (reject / watchdogs) with recovery.
+# `make waves|gtkwave WAVE_TB=rnd_all [SEED=N]`.
+verilator_rnd_all:
+	@echo "========== Verilator randomized all-in-one test (item 49, SEED=$(SEED)) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator"; exit 1; fi
+	rm -rf $(RND_ALL_DIR)
+	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(RND_ALL_TOP) --Mdir $(RND_ALL_DIR) -o rnd_all_sim $(RND_ALL_FILES)
+	@echo "Running..."
+	./$(RND_ALL_DIR)/rnd_all_sim +seed=$(SEED)
 
 # Item 29: integrated bridge at width 160 -- validates the gearbox + burst-FIFO fold end-to-end.
 verilator_bridge_w160:
@@ -679,6 +697,9 @@ docs_check:
 	@grep -q "Redundant / independent coverage" docs/verification_plan.md || { echo "docs_check: verification_plan.md must have the Redundant / independent coverage subsection (item 45)"; exit 1; }
 	@grep -q "cocotb_coverage" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the independent cocotb_coverage functional metric (item 45)"; exit 1; }
 	@grep -q "45/45" docs/verification_plan.md || { echo "docs_check: verification_plan.md must record the independent functional-coverage baseline (45/45)"; exit 1; }
+	@# Phase H (item 49): the docs must record the randomized waveform suite.
+	@grep -q "Randomized waveform tests" docs/verification_plan.md || { echo "docs_check: verification_plan.md must document the randomized waveform suite (items 46-49)"; exit 1; }
+	@grep -q "rnd_all" docs/verification_plan.md README.md || { echo "docs_check: docs must list the rnd_* waveform tests (item 49)"; exit 1; }
 	@echo "Documentation check passed"
 
 # ============================ Vendor simulators ============================
@@ -709,7 +730,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(DEFRAMER_GB_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(BRIDGE_COV_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(RND_DATA_DIR) $(RND_DATA_ERR_DIR) $(RND_NONDATA_ERR_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(DEFRAMER_GB_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(BRIDGE_COV_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(RND_DATA_DIR) $(RND_DATA_ERR_DIR) $(RND_NONDATA_ERR_DIR) $(RND_ALL_DIR) $(WAVE_DIR)
 	rm -rf obj_dir_covmerge
 	rm -f coverage.info
 	rm -rf $(REPORT_DIR)

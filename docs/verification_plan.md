@@ -222,6 +222,25 @@ for now.
   in Gen5 — the fix committed Gen5 before the round-trip, and *also* made the source fail-fast).
   This applies to the cocotb/PyUVM drivers and the self-clocking SV smokes alike.
 
+## Randomized waveform tests (Phase H, items 46–49)
+
+On top of the directed smokes, four **seeded random** self-checking tests exercise the integrated
+bridge and double as GTKWave-viewable scenarios (`make waves|gtkwave WAVE_TB=<t> [SEED=N]`, saved
+`waves/<t>.gtkw` layouts). A fixed default `SEED` keeps them deterministic in CI (each is part of
+`make regress`); `SEED=N` (or `+seed=N`) sweeps them locally. All waits are bounded and fail-fast
+(see DV conventions).
+
+| `WAVE_TB` | Test | Exercises |
+|-----------|------|-----------|
+| `rnd_data`         | `tb_pipe7_rnd_data`         | random RDI traffic (data, `is_os`, gaps/backpressure), clean loopback, **bit-exact in-order round-trip** |
+| `rnd_data_err`     | `tb_pipe7_rnd_data_err`     | random **datapath faults** — garbage RX → `sync_error` (+ re-lock), sink stall → `rx_overflow` (+ drain) |
+| `rnd_nondata_err`  | `tb_pipe7_rnd_nondata_err`  | random **control / message-bus faults** — illegal-request reject, hung-PHY / hung-msgbus watchdog timeouts (+ recovery) |
+| `rnd_all`          | `tb_pipe7_rnd_all`          | one run whose scheduler **interleaves all of the above** with clean data windows |
+
+Each guarantees at least one of every fault class it targets and checks both detection (the DUT
+raises the expected flag / error) and recovery (the link re-locks / the FSM completes the next
+legal request), so the random suite is a redundant cross-check to the directed error-path smokes.
+
 ## Exit criteria (per commit)
 
 - `make lint` clean (RTL + every TB/interface + the UVM DUT wiring).

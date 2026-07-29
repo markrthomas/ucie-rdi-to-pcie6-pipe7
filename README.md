@@ -113,6 +113,13 @@ Two-tier, mirroring the predecessor's methodology:
   identical shipped `src/` RTL (no `sv2v`). `make fcov` scores a spec-derived model and gates
   **≥98%** — current baseline **45/45 = 100% functional coverage** on Icarus, surfaced beside the
   Verilator line union in `make report`.
+- **Randomized waveform suite** — four seeded, self-checking integration tests on the integrated
+  bridge, each also viewable in GTKWave (`make gtkwave WAVE_TB=<t> [SEED=N]`): **`rnd_data`**
+  (random RDI traffic, bit-exact round-trip), **`rnd_data_err`** (random datapath faults —
+  garbage RX→`sync_error`, sink stall→`rx_overflow` — with recovery), **`rnd_nondata_err`**
+  (random control/message-bus faults — illegal-request reject, hung-PHY/msgbus watchdog timeouts —
+  with recovery), and **`rnd_all`** (one run interleaving all of the above). Seeded ⇒ deterministic
+  in CI (part of `make regress`), sweepable locally (`SEED=N`).
 - **Performance & KPIs** — `make report` aggregates throughput/latency/utilization/occupancy
   (from a bound `pipe7_perf_monitor`) + DUT coverage + smoke/formal/cocotb status into
   `report/{metrics.json, report.md, report.html}`; `make report_check` gates them against
@@ -136,7 +143,8 @@ verification plan.
 
 - `make regress` — release gate (lint + every Verilator smoke).
 - `make cocotb` — Tier 1b PyUVM-on-Cocotb cross-checks (datapath + control-plane + message-bus).
-- `make waves WAVE_TB=framing|ctrl|msgbus|gen6|assn` — build+run a testbench with tracing to
-  `waves/<tb>.vcd`; `make gtkwave WAVE_TB=...` opens it in GTKWave with the saved
-  [`waves/<tb>.gtkw`](waves/) signal layout.
+- `make waves WAVE_TB=framing|ctrl|msgbus|gen6|assn|integ|rnd_data|rnd_data_err|rnd_nondata_err|rnd_all [SEED=N]`
+  — build+run a testbench with tracing to `waves/<tb>.vcd`; `make gtkwave WAVE_TB=...` opens it in
+  GTKWave with the saved [`waves/<tb>.gtkw`](waves/) signal layout. `SEED` selects the random seed
+  for the `rnd_*` tests.
 - `make ci` — the full local run (regress + coverage + NL1 + docs check).

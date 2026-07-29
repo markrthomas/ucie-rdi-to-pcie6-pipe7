@@ -462,6 +462,22 @@ on Icarus; `make fcov` gates ≥98% and writes `report/fcov.{json,txt}`; `gen_re
 independent number into the JSON/MD/HTML report + CI step-summary alongside the Verilator line
 union; `docs_check`-guarded in `docs/verification_plan.md`).
 
+**Phase H — randomized, waveform-viewable test suite (delivered):** four seeded, self-checking
+integration tests on the integrated bridge, each also a GTKWave scenario
+(`make waves|gtkwave WAVE_TB=<t> [SEED=N]`, saved `waves/<t>.gtkw`); fixed default `SEED` ⇒
+deterministic in CI (all in `make regress`), `+seed=N` sweepable locally; all waits bounded /
+fail-fast. 46 (`tb_pipe7_rnd_data`: random RDI traffic — data/`is_os`/gaps/backpressure — clean
+loopback, **bit-exact in-order round-trip**). 47 (`tb_pipe7_rnd_data_err`: random datapath faults —
+garbage RX → `sync_error` + re-lock, sink stall → `rx_overflow` + drain — via an RxData mux + an
+always-ready RX sink that tops the egress credit pool back up so it recovers after an overflow
+stall). 48 (`tb_pipe7_rnd_nondata_err`: random control/msgbus faults — illegal-request reject,
+hung-PHY / hung-msgbus watchdog timeouts — via `phy_hang`/`mb_hang` muxes, with a tracked power
+state so every control request is a real transition the PHY stub completes). 49
+(`tb_pipe7_rnd_all`: one scheduler interleaving all of the above with clean data windows;
+README + `docs/verification_plan.md` "Randomized waveform tests" section, `docs_check`-guarded;
+`make help` + `WAVE_TB` dispatch updated). Each guarantees ≥1 of every fault class and checks
+detection **and** recovery — a redundant cross-check to the directed error-path smokes.
+
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
     sink makes `dp_rx_valid` write a **full** `rx_cdc` and the block is silently dropped (today the
