@@ -18,32 +18,59 @@ the phased build-out are in **`PLAN.md`** — read it first.
 
 ## Workflow
 
-- Execute `PLAN.md` as a **numbered closure plan, one item per commit** (items 0–12).
-- **Item 0 (spec cross-check) gates items 2–12.** Its errata sheet is
-  `docs/pipe71_spec_crosscheck.md`; every row is UNCONFIRMED until reconciled against the
-  controlled **Intel PIPE 7.1 spec** (+ PCIe 6.x base for flit/PAM4/L0p). Do **not** freeze
-  the interface, register map, or `pipe7_pkg` encodings until the relevant rows resolve.
-- All control-plane encodings in `src/pipe7_pkg.sv` are working-knowledge **placeholders**
-  flagged for item-0 confirmation.
+- Execute `PLAN.md` as a **numbered closure plan, one item per commit**. The plan has grown
+  well past the original 0–12: items 0–14 (cores + three DV tiers), 15–25 (integrated IP +
+  all-tier verification), and 26–49 (hardening: correctness guards, formal-on-real-RTL,
+  coverage closure to 98.3%, independent functional-coverage DV, randomized waveform suite).
+  **All items 0–49 are delivered.**
+- **Item 0 (spec cross-check) is COMPLETE** (2026-07-23). The errata sheet
+  `docs/pipe71_spec_crosscheck.md` is reconciled against the controlled **Intel PIPE 7.1
+  spec (Ref 643108, Rev 7.1, Sep 2025)** + PCIe 6.x base; corrections are folded into
+  `PLAN.md` and `src/pipe7_pkg.sv`. The interface, register map, and encodings are frozen.
+- `src/pipe7_pkg.sv` encodings are no longer placeholders — they carry the item-0 verdicts.
 
 ## Current state
 
-- Seed + **item 1 done** (pkg, ported CDC `pipe7_cdc_elastic_buf.sv`, pass-through
-  `ucie_rdi_to_pipe7_mac_bridge.sv`, smoke + NL1 TBs). Verilator gate green.
-- **Item 0 scaffolded** (errata table written, awaiting spec §-refs).
-- **Next:** fill item 0 against the spec, then item 2 (interface skeleton).
+**Functionally complete, three-tier-verified IP. All plan items 0–49 delivered; Verilator
+gate green** (`make lint` clean, `make regress` → all smokes PASS incl. `[BRIDGE] PASS` and
+the randomized suite `[RND *] PASS`). Last commit: `7cbd0e0` (Item 49, Phase H).
+
+- **Design (`src/`):** integrated top `ucie_rdi_to_pipe7_mac_bridge.sv` composing RDI
+  ingress/egress (+credit FC) → RDI↔PCLK CDC → rate-aware MAC datapath
+  (`pipe7_mac_datapath_ra`: Gen5 128b/130b full-width gearbox `pipe7_tx_framer_gb`/
+  `pipe7_rx_deframer_gb` up to 2 blocks/PCLK + `pipe7_rx_burst_fifo`; Gen6 raw wide plane
+  `pipe7_gen6_datapath`) → PIPE MAC, with control FSM (`pipe7_mac_ctrl_fsm`, PhyStatus-gated
+  + completion watchdog), message-bus master + regfile (`pipe7_msgbus_master`/`pipe7_regfile`,
+  PAM4RestrictedLevels write-through), and bound SVA. Overflow/accumulator guards in place.
+- **Verification:** Tier 1 Verilator smoke suite (integrated + NL1 + directed error-path +
+  Phase H randomized waveform TBs), **DUT line coverage 651/662 = 98.34%**; Tier 1b
+  PyUVM-on-Cocotb cross-check (`make cocotb`, Verilator); Phase G independent functional
+  coverage on **Icarus** via `cocotb_coverage` (`make fcov`, **45/45 = 100%**); Tier 2
+  UVM (VCS) authored/review-validated; formal (`make formal`) — CDC multiclock, RDI credit
+  FC, gearbox bounds, deframer guard on real RTL via yosys-slang. Perf/KPI report via
+  `make report`.
+- **Next:** hardening backlog residuals only — notably **runtime sub-width lane selection**
+  (drive low-N lanes within `PIPE_WIDTH` from `Width`/`RxWidth`), deferred in item 30. No
+  open correctness items. Check `PLAN.md` "Hardening backlog" for anything reopened.
 
 ## Verification
 
-Two-tier (see `docs/verification_plan.md`):
+Three-tier (see `docs/verification_plan.md`):
 
-- **Verilator = the open-source gate** (toolchain: oss-cad-suite on PATH — `verilator`,
-  `iverilog`, `sby`). Per commit keep green:
+- **Tier 1 — Verilator = the open-source gate** (toolchain: oss-cad-suite on PATH —
+  `verilator`, `iverilog`, `sby`). Per commit keep green:
   - `make lint` (RTL strict `-Wall`; TB passes waive UNUSEDSIGNAL/UNDRIVEN — externally-driven TB clocks)
-  - `make regress` → `[SMOKE] PASS` · `make verilator_nl1` → `[SMOKE NL1] PASS`
-  - `make regress_cov` → line coverage
-- **UVM (VCS/UVM 1.2) is authored-and-review-validated, NOT run here** — no VCS in this
-  environment. Validate UVM by review; the Verilator gate is what actually runs.
+  - `make regress` — the full smoke suite (integrated `[BRIDGE] PASS`, framing/gearbox,
+    ctrl/msgbus, Gen6, error-path, and the Phase H `[RND *] PASS` randomized TBs)
+  - `make regress_nl1` → `[BRIDGE MIN] PASS` (NUM_LANES=1) · `make regress_cov` → line coverage
+  - `make coverage_merge` → union DUT-`src/` line coverage (**651/662 = 98.34%** baseline)
+- **Tier 1b — PyUVM-on-Cocotb cross-check**, *runnable here*: `make cocotb` (Verilator).
+  Phase G adds an independent functional-coverage cross-check on **Icarus**:
+  `make fcov` (`cocotb_coverage`, **45/45 = 100%** bins).
+- **Tier 2 — UVM (VCS/UVM 1.2) is authored-and-review-validated, NOT run here** — no VCS in
+  this environment. Validate UVM by review; the Verilator gate is what actually runs.
+- **Formal:** `make formal` (SymbiYosys; CDC multiclock, RDI credit FC, gearbox bounds,
+  deframer guard on real RTL via yosys-slang). **Report:** `make report` → `report/`.
 
 ## Conventions
 
