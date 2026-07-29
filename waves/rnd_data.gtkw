@@ -1,0 +1,57 @@
+[*]
+[*] GTKWave save file — tb_pipe7_rnd_data : randomized data test (Phase H item 46)
+[*] Open via:  make gtkwave WAVE_TB=rnd_data [SEED=N]
+[*]
+[dumpfile] "rnd_data.vcd"
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 280
+[signals_width] 340
+[sst_expanded] 1
+@200
+-Clocks / Reset
+@28
+tb_pipe7_rnd_data.pclk
+tb_pipe7_rnd_data.rdi_clk
+tb_pipe7_rnd_data.rst_n
+@200
+-RDI TX  (random flits in, credit-gated)
+@28
+tb_pipe7_rnd_data.rdi_tx_valid
+tb_pipe7_rnd_data.rdi_tx_sob
+tb_pipe7_rnd_data.rdi_tx_is_os
+@22
+tb_pipe7_rnd_data.rdi_tx_data[63:0]
+tb_pipe7_rnd_data.rdi_tx_crd[1:0]
+@200
+-PIPE stream  (bridge <-> PHY loopback, 80b words)
+@28
+tb_pipe7_rnd_data.tx_data_valid
+@22
+tb_pipe7_rnd_data.tx_data[79:0]
+tb_pipe7_rnd_data.rx_data[79:0]
+@200
+-Datapath status
+@28
+tb_pipe7_rnd_data.block_locked
+tb_pipe7_rnd_data.sync_error
+tb_pipe7_rnd_data.in_data_phase
+tb_pipe7_rnd_data.rx_overflow
+@200
+-RDI RX  (flits out, checked)
+@28
+tb_pipe7_rnd_data.rdi_rx_valid
+tb_pipe7_rnd_data.rdi_rx_sob
+tb_pipe7_rnd_data.rdi_rx_is_os
+@22
+tb_pipe7_rnd_data.rdi_rx_data[63:0]
+tb_pipe7_rnd_data.rdi_rx_crd[1:0]
+@200
+-Scoreboard
+@23
+tb_pipe7_rnd_data.sent
+tb_pipe7_rnd_data.recv
+tb_pipe7_rnd_data.rdi_errors
+[pattern_trace] 1
+[pattern_trace] 0

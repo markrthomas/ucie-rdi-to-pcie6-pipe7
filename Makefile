@@ -84,6 +84,11 @@ W160_DIR = obj_dir_w160
 BRIDGE_COV_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_mac_bridge_cov.sv
 BRIDGE_COV_TOP = tb_pipe7_mac_bridge_cov
 BRIDGE_COV_DIR = obj_dir_bridge_cov
+# Phase H (items 46-49): randomized, waveform-viewable integration tests on the integrated bridge.
+# Seeded (SEED / +seed=N) -> deterministic in CI, sweepable locally; each is self-checking.
+RND_DATA_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/pipe7_mac_bridge_assertions.sv test/tb_pipe7_rnd_data.sv
+RND_DATA_TOP = tb_pipe7_rnd_data
+RND_DATA_DIR = obj_dir_rnd_data
 # Item 6: Gen6 (Rate=5) wide raw datapath + PAM4, composed with the ctrl FSM.
 GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
 GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
@@ -127,6 +132,8 @@ WAVE_DIR   = obj_dir_waves
 WAVE_VCD   = waves/$(WAVE_TB).vcd
 WAVE_GTKW  = waves/$(WAVE_TB).gtkw
 WAVE_EXTRA =
+# Phase H: seed for the randomized rnd_* TBs (fixed default -> deterministic; override e.g. SEED=7).
+SEED      ?= 49
 ifeq ($(WAVE_TB),ctrl)
     WAVE_FILES = $(CTRL_FILES)
     WAVE_TOP   = $(CTRL_TOP)
@@ -143,6 +150,10 @@ else ifeq ($(WAVE_TB),assn)
 else ifeq ($(WAVE_TB),integ)
     WAVE_FILES = $(INTEG_FILES)
     WAVE_TOP   = $(INTEG_TOP)
+    WAVE_EXTRA = --assert
+else ifeq ($(WAVE_TB),rnd_data)
+    WAVE_FILES = $(RND_DATA_FILES)
+    WAVE_TOP   = $(RND_DATA_TOP)
     WAVE_EXTRA = --assert
 else
     WAVE_FILES = $(FRAMING_FILES)
@@ -215,7 +226,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ verilator_rnd_data
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -284,6 +295,16 @@ verilator_bridge_cov:
 	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(BRIDGE_COV_TOP) --Mdir $(BRIDGE_COV_DIR) -o bcov_sim $(BRIDGE_COV_FILES)
 	@echo "Running..."
 	./$(BRIDGE_COV_DIR)/bcov_sim
+
+# Phase H (item 46): randomized data test -- seeded random RDI traffic, clean loopback, bit-exact
+# round-trip check. Waveform-viewable via `make waves|gtkwave WAVE_TB=rnd_data [SEED=N]`.
+verilator_rnd_data:
+	@echo "========== Verilator randomized data test (item 46, SEED=$(SEED)) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator"; exit 1; fi
+	rm -rf $(RND_DATA_DIR)
+	$(VERILATOR) --binary --timing --assert -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(RND_DATA_TOP) --Mdir $(RND_DATA_DIR) -o rnd_data_sim $(RND_DATA_FILES)
+	@echo "Running..."
+	./$(RND_DATA_DIR)/rnd_data_sim +seed=$(SEED)
 
 # Item 29: integrated bridge at width 160 -- validates the gearbox + burst-FIFO fold end-to-end.
 verilator_bridge_w160:
@@ -488,7 +509,7 @@ waves:
 		-Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH \
 		+define+ENABLE_WAVES --top-module $(WAVE_TOP) --Mdir $(WAVE_DIR) -o wave_sim $(WAVE_FILES)
 	@echo "Running $(WAVE_TOP) with tracing (WAVE_TB=$(WAVE_TB))..."
-	./$(WAVE_DIR)/wave_sim +wavefile=$(WAVE_VCD)
+	./$(WAVE_DIR)/wave_sim +wavefile=$(WAVE_VCD) +seed=$(SEED)
 	@echo "[WAVES] wrote $(WAVE_VCD)"
 
 gtkwave: waves
@@ -651,7 +672,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(DEFRAMER_GB_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(BRIDGE_COV_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(DEFRAMER_GB_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(BRIDGE_COV_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(RND_DATA_DIR) $(WAVE_DIR)
 	rm -rf obj_dir_covmerge
 	rm -f coverage.info
 	rm -rf $(REPORT_DIR)

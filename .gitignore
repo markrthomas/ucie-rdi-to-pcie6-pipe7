@@ -18,6 +18,10 @@ obj_dir_cdc/
 obj_dir_gen6/
 obj_dir_assn/
 obj_dir_integ/
+obj_dir_rnd_data/
+obj_dir_rnd_data_err/
+obj_dir_rnd_nondata_err/
+obj_dir_rnd_all/
 obj_dir_waves/
 coverage.info
 *.dat
