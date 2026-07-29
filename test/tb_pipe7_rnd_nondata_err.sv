@@ -139,12 +139,23 @@ module tb_pipe7_rnd_nondata_err;
 
     // ---- Main ----
     int rejects, ctrl_wds, mb_wds, nep;
+    logic [3:0] cur_pd;   // tracked PowerDown so every ctrl request is a real state change
+                          // (the PHY stub only completes when power_down/rate/width actually change)
+
+    task automatic ensure_p0();
+        if (cur_pd != PD_P0) begin
+            drive_req(REQ_POWER, PD_P0, RATE_GEN5, W_160, 400);
+            if (!saw_done) $fatal(1, "[RND NONDATA ERR] FAIL: could not return to P0");
+            cur_pd = PD_P0;
+        end
+    endtask
+
     initial begin
         req_valid = 1'b0; req_kind = REQ_POWER; req_power_down = PD_P0; req_rate = RATE_GEN5;
         req_width = W_160; req_rxwidth = W_160;
         mb_req_valid = 1'b0; mb_req_write = 1'b0; mb_req_committed = 1'b0; mb_req_addr = '0; mb_req_wdata = '0;
         phy_hang = 1'b0; mb_hang = 1'b0;
-        rejects = 0; ctrl_wds = 0; mb_wds = 0;
+        rejects = 0; ctrl_wds = 0; mb_wds = 0; cur_pd = PD_P0;
 
         rst_n = 1'b0;
         repeat (6) @(negedge pclk);
@@ -157,25 +168,30 @@ module tb_pipe7_rnd_nondata_err;
 
             if (cls == 0) begin
                 // ---- REJECT: illegal Rate/Width in P2 ----
-                drive_req(REQ_POWER, PD_P2, RATE_GEN5, W_160, 400);       // enter P2 (legal)
+                ensure_p0();
+                drive_req(REQ_POWER, PD_P2, RATE_GEN5, W_160, 400);       // enter P2 (real change)
                 if (!saw_done) $fatal(1, "[RND NONDATA ERR] FAIL: could not enter P2");
+                cur_pd = PD_P2;
                 drive_req(($urandom & 1) ? REQ_RATE : REQ_WIDTH, PD_P2,
                           RATE_GEN6, ($urandom & 1) ? W_80 : W_40, 200);   // illegal in P2
                 if (!saw_err || saw_done) $fatal(1, "[RND NONDATA ERR] FAIL: illegal req in P2 not rejected");
                 rejects++;
-                drive_req(REQ_POWER, PD_P0, RATE_GEN5, W_160, 400);       // back to P0
-                if (!saw_done) $fatal(1, "[RND NONDATA ERR] FAIL: P2->P0 recovery failed");
+                ensure_p0();                                              // back to P0
 
             end else if (cls == 1) begin
                 // ---- CTRL_WD: hung PHY -> ctrl watchdog req_error, then recover ----
+                // Use a guaranteed PowerDown change (P0<->P0S) so the request actually handshakes.
+                ensure_p0();
                 phy_hang = 1'b1;
-                drive_req(REQ_RATE, PD_P0, ($urandom & 1) ? RATE_GEN6 : RATE_GEN5, W_160, WD_BOUND);
+                drive_req(REQ_POWER, PD_P0S, RATE_GEN5, W_160, WD_BOUND);  // hung -> watchdog
                 if (!saw_err || saw_done) $fatal(1, "[RND NONDATA ERR] FAIL: ctrl watchdog did not fire on hung PHY");
+                cur_pd = PD_P0S;                                          // FSM holds the applied value
                 ctrl_wds++;
                 phy_hang = 1'b0;
-                repeat (8) @(negedge pclk);
-                drive_req(REQ_RATE, PD_P0, RATE_GEN5, W_160, 400);       // recovery: completes
+                repeat (12) @(negedge pclk);
+                drive_req(REQ_POWER, PD_P0, RATE_GEN5, W_160, 600);       // recovery: real change -> done
                 if (!saw_done) $fatal(1, "[RND NONDATA ERR] FAIL: ctrl did not recover after watchdog");
+                cur_pd = PD_P0;
 
             end else begin
                 // ---- MB_WD: hung msgbus -> response watchdog mb_rsp_error, then recover ----

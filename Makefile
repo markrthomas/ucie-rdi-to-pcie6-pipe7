@@ -95,6 +95,11 @@ RND_DATA_DIR = obj_dir_rnd_data
 RND_DATA_ERR_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_rnd_data_err.sv
 RND_DATA_ERR_TOP = tb_pipe7_rnd_data_err
 RND_DATA_ERR_DIR = obj_dir_rnd_data_err
+# item 48: random non-data (control/msgbus) errors -- illegal requests + hung-PHY/msgbus watchdog
+# timeouts; NO --assert (illegal rate + timeouts break the item-7 SVA P2/P3).
+RND_NONDATA_ERR_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/tb_pipe7_rnd_nondata_err.sv
+RND_NONDATA_ERR_TOP = tb_pipe7_rnd_nondata_err
+RND_NONDATA_ERR_DIR = obj_dir_rnd_nondata_err
 # Item 6: Gen6 (Rate=5) wide raw datapath + PAM4, composed with the ctrl FSM.
 GEN6_RTL = src/pipe7_pkg.sv src/pipe7_mac_ctrl_fsm.sv src/pipe7_gen6_datapath.sv
 GEN6_FILES = $(GEN6_RTL) test/pipe7_phy_responder_stub.sv test/tb_pipe7_gen6.sv
@@ -164,6 +169,9 @@ else ifeq ($(WAVE_TB),rnd_data)
 else ifeq ($(WAVE_TB),rnd_data_err)
     WAVE_FILES = $(RND_DATA_ERR_FILES)
     WAVE_TOP   = $(RND_DATA_ERR_TOP)
+else ifeq ($(WAVE_TB),rnd_nondata_err)
+    WAVE_FILES = $(RND_NONDATA_ERR_FILES)
+    WAVE_TOP   = $(RND_NONDATA_ERR_TOP)
 else
     WAVE_FILES = $(FRAMING_FILES)
     WAVE_TOP   = $(FRAMING_TOP)
@@ -235,7 +243,7 @@ regress_all: ci
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ verilator_rnd_data verilator_rnd_data_err
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ verilator_rnd_data verilator_rnd_data_err verilator_rnd_nondata_err
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -324,6 +332,16 @@ verilator_rnd_data_err:
 	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(RND_DATA_ERR_TOP) --Mdir $(RND_DATA_ERR_DIR) -o rnd_data_err_sim $(RND_DATA_ERR_FILES)
 	@echo "Running..."
 	./$(RND_DATA_ERR_DIR)/rnd_data_err_sim +seed=$(SEED)
+
+# Phase H (item 48): randomized non-data (control / message-bus) errors -- illegal requests +
+# hung-responder watchdog timeouts with recovery. `make waves|gtkwave WAVE_TB=rnd_nondata_err [SEED=N]`.
+verilator_rnd_nondata_err:
+	@echo "========== Verilator randomized non-data-errors test (item 48, SEED=$(SEED)) =========="
+	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator"; exit 1; fi
+	rm -rf $(RND_NONDATA_ERR_DIR)
+	$(VERILATOR) --binary --timing -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(RND_NONDATA_ERR_TOP) --Mdir $(RND_NONDATA_ERR_DIR) -o rnd_nondata_err_sim $(RND_NONDATA_ERR_FILES)
+	@echo "Running..."
+	./$(RND_NONDATA_ERR_DIR)/rnd_nondata_err_sim +seed=$(SEED)
 
 # Item 29: integrated bridge at width 160 -- validates the gearbox + burst-FIFO fold end-to-end.
 verilator_bridge_w160:
@@ -691,7 +709,7 @@ repo_status:
 
 clean:
 	@echo "========== Cleaning simulation files =========="
-	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(DEFRAMER_GB_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(BRIDGE_COV_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(RND_DATA_DIR) $(RND_DATA_ERR_DIR) $(WAVE_DIR)
+	rm -rf $(VERILATOR_DIR) $(COV_DIR) $(NL1_DIR) $(CTRL_DIR) $(MSGBUS_DIR) $(FRAMING_DIR) $(FRAMING_GB_DIR) $(DEFRAMER_OVF_DIR) $(DEFRAMER_GB_OVF_DIR) $(TIMEOUT_DIR) $(BURST_DIR) $(W160_DIR) $(BRIDGE_COV_DIR) $(RATE_DP_DIR) $(RDI_DIR) $(CDC_DIR) $(GEN6_DIR) $(ASSN_DIR) $(INTEG_DIR) $(RND_DATA_DIR) $(RND_DATA_ERR_DIR) $(RND_NONDATA_ERR_DIR) $(WAVE_DIR)
 	rm -rf obj_dir_covmerge
 	rm -f coverage.info
 	rm -rf $(REPORT_DIR)

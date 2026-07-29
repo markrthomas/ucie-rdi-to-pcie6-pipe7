@@ -1,0 +1,57 @@
+[*]
+[*] GTKWave save file — tb_pipe7_rnd_nondata_err : randomized control/msgbus errors (Phase H item 48)
+[*] Open via:  make gtkwave WAVE_TB=rnd_nondata_err [SEED=N]
+[*]
+[dumpfile] "rnd_nondata_err.vcd"
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 280
+[signals_width] 360
+[sst_expanded] 1
+@200
+-Clocks / Reset
+@28
+tb_pipe7_rnd_nondata_err.pclk
+tb_pipe7_rnd_nondata_err.rst_n
+@200
+-Hung-responder knobs
+@28
+tb_pipe7_rnd_nondata_err.phy_hang
+tb_pipe7_rnd_nondata_err.mb_hang
+@200
+-Control request / response
+@28
+tb_pipe7_rnd_nondata_err.req_valid
+@22
+tb_pipe7_rnd_nondata_err.req_kind[1:0]
+tb_pipe7_rnd_nondata_err.req_power_down[3:0]
+tb_pipe7_rnd_nondata_err.req_rate[3:0]
+@28
+tb_pipe7_rnd_nondata_err.busy
+tb_pipe7_rnd_nondata_err.done
+tb_pipe7_rnd_nondata_err.req_error
+@22
+tb_pipe7_rnd_nondata_err.power_down[3:0]
+tb_pipe7_rnd_nondata_err.rate[3:0]
+@28
+tb_pipe7_rnd_nondata_err.phy_status
+@200
+-Message bus request / response
+@28
+tb_pipe7_rnd_nondata_err.mb_req_valid
+tb_pipe7_rnd_nondata_err.mb_req_write
+tb_pipe7_rnd_nondata_err.mb_req_committed
+tb_pipe7_rnd_nondata_err.mb_rsp_valid
+tb_pipe7_rnd_nondata_err.mb_rsp_error
+@22
+tb_pipe7_rnd_nondata_err.m2p[7:0]
+tb_pipe7_rnd_nondata_err.p2m[7:0]
+@200
+-Scoreboard
+@23
+tb_pipe7_rnd_nondata_err.rejects
+tb_pipe7_rnd_nondata_err.ctrl_wds
+tb_pipe7_rnd_nondata_err.mb_wds
+[pattern_trace] 1
+[pattern_trace] 0
