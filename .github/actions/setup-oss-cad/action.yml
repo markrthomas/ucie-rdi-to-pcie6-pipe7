@@ -1,0 +1,18 @@
+name: 'Setup OSS CAD Suite'
+description: >
+  Install the OSS CAD Suite (verilator, iverilog, sby), retrying transient
+  download failures. The upstream YosysHQ/setup-oss-cad-suite action occasionally
+  fails at "Getting download URL for oss-cad-suite" (GitHub API rate-limit /
+  release-fetch hiccup); wrapping it in a retry stops that flake from reding the
+  run. Authenticated with the job token to reduce the rate-limit itself.
+runs:
+  using: 'composite'
+  steps:
+    - name: Install oss-cad-suite (with retry)
+      uses: Wandalen/wretry.action@v3
+      with:
+        action: YosysHQ/setup-oss-cad-suite@v3
+        with: |
+          github-token: ${{ github.token }}
+        attempt_limit: 3
+        attempt_delay: 15000
