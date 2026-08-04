@@ -86,6 +86,29 @@ flowchart LR
 See [`docs/architecture.md`](docs/architecture.md) for the clock-domain, datapath, and
 control-plane detail behind these diagrams.
 
+**Power domains (UPF)** — authored power intent ([`test/upf/`](test/upf/), see
+[`docs/power_intent.md`](docs/power_intent.md)): an always-on control plane keeps the link-wake
+handshakes alive while the datapath is power-gated in P1/P2.
+
+```mermaid
+flowchart TB
+  VDD["VDD (always-on)"] --> SW["power switch sw_dp"]
+  SW -->|"VDD_DP"| DP
+  subgraph AON["PD_AON — always-on"]
+    CTRL["pipe7_mac_ctrl_fsm"]
+    MBUS["pipe7_msgbus_master"]
+  end
+  subgraph DP["PD_DP — switchable (off in P1/P2)"]
+    DPATH["datapath: ingress / CDC / framer-deframer / egress"]
+    RF["pipe7_regfile (RETAINED)"]
+  end
+  CTRL -->|"PowerDown"| PMU["pipe7_pmu (DV)"]
+  PMU -->|"dp_pwr_en"| SW
+  PMU -->|"dp_iso_en"| ISO["isolation: data to 0, TxElecIdle to 1"]
+  PMU -->|"save / restore"| RF
+  DPATH --> ISO
+```
+
 ## Verification
 
 **Coverage at a glance** (current baselines; `make report` regenerates them):
@@ -133,6 +156,12 @@ Two-tier, mirroring the predecessor's methodology:
 - **UVM (VCS/UVM 1.2)** — authored-and-review-validated growth path (`make uvm`), retargeted at
   the integrated bridge (credit/flit RDI, dual-clock) with a **Gen6-wide RX** agent + mirrored-
   queue scoreboard, alongside the control/message-bus agents, PHY-responder BFM, and covergroups.
+- **Power-aware (UPF)** — authored-and-review-validated IEEE-1801 power intent (`test/upf/`):
+  always-on control plane + switchable datapath (gated in P1/P2) with a power switch, output
+  isolation, and config-regfile retention; a P0→P2→P0 test checks isolation, control liveness, and
+  retention. `make upf` runs it under VCS `-upf` (no OSS power-aware simulator here);
+  `make verilator_upf` is an OSS **skeleton** (elaboration + control/PMU/data, no power intent) in
+  `make regress`. See [`docs/power_intent.md`](docs/power_intent.md).
 
 See [`docs/`](docs/) and [`PLAN.md`](PLAN.md) for architecture, interface contract, and the
 verification plan.

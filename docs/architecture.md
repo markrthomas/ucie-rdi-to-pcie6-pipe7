@@ -79,6 +79,28 @@ flowchart LR
   GEN --> CHK["report_check (thresholds)"]
 ```
 
+**Power domains (UPF)** — authored power intent (`test/upf/bridge.upf`); see
+[power_intent.md](power_intent.md). Always-on control plane + switchable datapath, gated in P1/P2:
+
+```mermaid
+flowchart TB
+  VDD["VDD (always-on)"] --> SW["power switch sw_dp"]
+  SW -->|"VDD_DP"| DP
+  subgraph AON["PD_AON — always-on"]
+    CTRL["pipe7_mac_ctrl_fsm"]
+    MBUS["pipe7_msgbus_master"]
+  end
+  subgraph DP["PD_DP — switchable (off in P1/P2)"]
+    DPATH["ingress / CDC / framer-deframer / burst FIFO / egress"]
+    RF["pipe7_regfile (RETAINED)"]
+  end
+  CTRL -->|"PowerDown"| PMU["pipe7_pmu (DV): decode to controls"]
+  PMU -->|"dp_pwr_en"| SW
+  PMU -->|"dp_iso_en"| ISO["isolation: data to 0, TxElecIdle to 1"]
+  PMU -->|"save / restore"| RF
+  DPATH --> ISO --> BND["PIPE boundary / PD_AON"]
+```
+
 ## Clock-domain crossing & reset
 
 The RDI (`rdi_clk`) and PIPE (`pclk`) domains are bridged by `pipe7_cdc_elastic_buf` (Gray-coded

@@ -478,6 +478,23 @@ README + `docs/verification_plan.md` "Randomized waveform tests" section, `docs_
 `make help` + `WAVE_TB` dispatch updated). Each guarantees ≥1 of every fault class and checks
 detection **and** recovery — a redundant cross-check to the directed error-path smokes.
 
+**Phase I — power-aware (UPF) verification (delivered):** 50 (`test/upf/`) adds IEEE-1801 power
+intent for the bridge and a power-aware test, in the **authored-and-review-validated (VCS-only)**
+convention — no open-source simulator here models UPF supply/isolation/retention/corruption
+semantics (power-aware sim needs VCS NLP / Questa PA / Xcelium). UPF, not CPF (CPF is
+legacy/Cadence-only). **Power architecture:** always-on `PD_AON` (control FSM + message-bus master
+— must stay alive through P1/P2 to sequence the wake handshakes) and switchable `PD_DP` (the whole
+TX/RX datapath, gated off in P1/P2) with a power switch on `VDD_DP`, output isolation (data→0,
+`TxElecIdle`→1), and **retention** on the config register file so programmed Tx-eq/
+`PAM4RestrictedLevels` survive low power. `bridge.upf` (domains/supply-sets/switch/isolation/
+retention/PST), `pipe7_pmu.sv` (DV-only sequencer: PIPE `PowerDown` → UPF controls),
+`tb_pipe7_upf_power.sv` (P0→P2→P0: isolation clamps while gated, control-plane liveness, config
+retention, datapath recovery), `Makefile.vcs`, `docs/power_intent.md`, `docs_check` guards. Note:
+the PIPE `PowerDown` P-states are *protocol* states, so this UPF is net-new physical-power modeling
+layered onto the IP. `make upf` = VCS `-upf` sign-off (not run here); `make verilator_upf` builds
+the same TB as an **OSS skeleton** (elaboration + control/PMU/data, **no** power intent) and is
+folded into `make regress` so the SV stays green.
+
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
     sink makes `dp_rx_valid` write a **full** `rx_cdc` and the block is silently dropped (today the
@@ -562,6 +579,12 @@ detection **and** recovery — a redundant cross-check to the directed error-pat
 - **Formal:** `make formal` (SymbiYosys) — CDC-buf invariants, RDI credit-FC no-underflow/
   over-credit, the Gen5 gearbox accept/accumulator bounds, and the data-phase/rate-mux control
   safety (TxElecIdle gating, no Gen5+Gen6 drive overlap, data-phase-only-from-P0). All PASS.
+- **Power-aware (UPF):** `make upf` (VCS `-upf`) runs `test/upf/tb_pipe7_upf_power.sv` against the
+  `test/upf/bridge.upf` power intent — P0→P2→P0 checking datapath isolation while gated, control-
+  plane liveness, and config-regfile retention. **Authored-and-review-validated, not run here** (no
+  OSS power-aware simulator). `make verilator_upf` builds the same TB as an OSS skeleton
+  (elaboration + control/PMU/data, no power intent) and is in `make regress`. See
+  `docs/power_intent.md`.
 
 ## Key reuse pointers (from predecessor repo)
 

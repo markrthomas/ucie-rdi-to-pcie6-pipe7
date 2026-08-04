@@ -20,19 +20,28 @@ bring the link back.
 
 ## Domain partition
 
+```mermaid
+flowchart TB
+  VDD["VDD (always-on rail)"] --> SW["power switch sw_dp"]
+  SW -->|"VDD_DP (gated)"| DP
+  subgraph AON["PD_AON — always-on (VDD)"]
+    CTRL["ctrl : pipe7_mac_ctrl_fsm"]
+    MBUS["mbus : pipe7_msgbus_master"]
+  end
+  subgraph DP["PD_DP — switchable (VDD_DP), off in P1/P2"]
+    DPATH["ingress / tx_cdc / datapath / rx_burst / rx_cdc / egress"]
+    RF["rf : pipe7_regfile  (RETAINED)"]
+  end
+  CTRL -->|"PowerDown / Rate / Width (wake the link)"| PMU["pmu : pipe7_pmu (DV-only)"]
+  PMU -->|"dp_pwr_en"| SW
+  PMU -->|"dp_iso_en"| ISO["isolation clamps: data/valid/status to 0; TxElecIdle to 1"]
+  PMU -->|"dp_ret_save / dp_ret_restore"| RF
+  DPATH --> ISO --> BND["PIPE boundary / PD_AON"]
 ```
-                 VDD (always-on)                         VDD_DP (switched)
-        ┌────────────────────────────────┐     ┌───────────────────────────────────────┐
-        │  PD_AON                         │     │  PD_DP        (gated off in P1/P2)     │
-        │   ctrl   pipe7_mac_ctrl_fsm     │     │   ingress  tx_cdc  datapath           │
-        │   mbus   pipe7_msgbus_master    │     │   rx_burst rx_cdc  egress             │
-        │   (+ top glue)                  │     │   rf  pipe7_regfile  ← RETAINED       │
-        └───────────────┬────────────────┘     └───────────────┬───────────────────────┘
-                        │  drives PowerDown/Rate/Width          │ isolation clamps while gated:
-                        │  handshakes to wake the link          │   data/valid/status → 0
-                        │                                       │   TxElecIdle        → 1
-                    sw_dp power switch  ── VDD → VDD_DP ──────────┘  (control: pmu/dp_pwr_en)
-```
+
+The bridge RTL is scope-locked and has no power-control ports, so the switch/isolation/retention
+controls come from the sibling **`pmu`** instance (a DV-only sequencer, `test/upf/pipe7_pmu.sv`)
+that decodes the PIPE `PowerDown` state the bridge already drives.
 
 | Element | Domain | Reason |
 |---------|--------|--------|
