@@ -49,9 +49,11 @@ the randomized suite `[RND *] PASS`). Last commit: `7cbd0e0` (Item 49, Phase H).
   UVM (VCS) authored/review-validated; formal (`make formal`) — CDC multiclock, RDI credit
   FC, gearbox bounds, deframer guard on real RTL via yosys-slang. Perf/KPI report via
   `make report`.
-- **Next:** hardening backlog residuals only — notably **runtime sub-width lane selection**
-  (drive low-N lanes within `PIPE_WIDTH` from `Width`/`RxWidth`), deferred in item 30. No
-  open correctness items. Check `PLAN.md` "Hardening backlog" for anything reopened.
+- **Next:** no open correctness items. Planned work: **Phase J (items 51–54, PLAN.md)** — a
+  realistic PIPE-7.1 §7 PHY register model (DV side) + attribute-aware MAC register map (RTL) with
+  the full bidirectional M2P/P2M register loop; illustrative-but-flagged fidelity. Also the
+  residual **runtime sub-width lane selection** (low-N lanes within `PIPE_WIDTH` from
+  `Width`/`RxWidth`), deferred in item 30. Check `PLAN.md` for anything reopened.
 
 ## Verification
 

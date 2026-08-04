@@ -495,6 +495,47 @@ layered onto the IP. `make upf` = VCS `-upf` sign-off (not run here); `make veri
 the same TB as an **OSS skeleton** (elaboration + control/PMU/data, **no** power intent) and is
 folded into `make regress` so the SV stays green.
 
+**Phase J — PHY register model + MAC register map (PIPE 7.1 §7) (planned).** Grow the message-bus
+register side from the current placeholders (a 16-entry flat responder stub + a generic MAC-side
+window) into a realistic, attribute-aware register block on **both** sides. The modeled PHY is a
+**generic PIPE-7.1-compliant PHY per the controlled Intel PIPE 7.1 spec (Ref 643108) §7 register
+spaces** — chosen over any named commercial part because vendor maps are NDA, while the §7 spaces
+are the common denominator every compliant PHY implements and the repo already documents their
+address map (`docs/pipe71_mac_signal_map.md`). **Fidelity policy (decided):** implement the
+spec-named registers; where item 0 did not pin an exact offset / field layout, use **documented
+illustrative** values *clearly flagged as such* (no fabrication of proprietary maps; no spec
+re-pin required). **MAC-side depth (decided):** the **full bidirectional loop**, including a P2M
+slave path so the PHY can write the §7.2 MAC register space. One numbered item per commit,
+lint-clean, `make regress` green each commit; commit only when asked.
+
+51. **Register-map foundation (pkg + docs).** No behavior change. Encode the §7 map as machine-usable
+    data in `src/pipe7_pkg.sv`: named address constants + a compact **attribute/reset descriptor**
+    per modeled register — type (`RW`/`RO`/`RW1C`/`RsvdZ`), reset value, write-mask — plus per-field
+    bit layouts for the registers items 52–54 implement (spec-unpinned specifics marked
+    *illustrative*). Add attribute/reset columns to `docs/pipe71_mac_signal_map.md`. This is the
+    single source of truth shared by the PHY model (A) and the MAC regfile (B). Lint/regress green.
+52. **(A) DV PHY register model.** `test/pipe7_phy_regmodel.sv`: a PHY-space (§7.1) message-bus
+    responder backed by the item-51 map with real attribute semantics (RW holds; RO ignores writes /
+    reads reset value; RW1C write-1-clears; RsvdZ reads 0), reset values, a modeled cross-space
+    side-effect (Rx Margin Control → Margin Status), and an **RO PHY identity/capabilities** register
+    (illustrative) for the commonly-used-PHY flavor. Refactor `pipe7_msgbus_responder_stub` to wrap
+    it (migrate the smokes that depended on the old `mem[i]=0xA0+i` reset contents). New directed
+    `tb_pipe7_phy_regmap` **register-walk** smoke asserting every attribute behavior; wire into
+    `regress`. Keep the tiers in sync: update the PyUVM `msgbus_model.py` responder/reference model
+    and the `cocotb_coverage` msgbus bins. Verification-side only — runs in the OSS gate.
+53. **(B) MAC-side register map (RTL).** Grow `src/pipe7_regfile.sv` from a generic window into a
+    named, attribute-aware MAC register file (RW/RO/RW1C, reset values, per-field decode) driving
+    the datapath config (PAM4RestrictedLevels today + any newly modeled fields). Resolve the related
+    lint waivers; update the integrated-smoke register checks; optional formal register-invariant
+    proof (RO immutability, RW1C semantics). Touches shipped `src/` → begin the coverage re-baseline.
+54. **(B) MAC register space P2M-slave + sign-off.** Add the **P2M-slave** path so the PHY model can
+    write the §7.2 MAC register space (Rx Margin/Rx/Tx Status) and the local controller can read it —
+    closing the bidirectional register loop through the integrated bridge (today P2M is consumed only
+    as read-completions / write-acks). Directed + randomized register round-trip tests (MAC regfile ↔
+    msgbus ↔ PHY model), new coverage bins + functional-coverage parity on Icarus, **re-baseline the
+    DUT line-coverage / fcov numbers** (updating the `docs_check` `651/662` and `45/45` guards +
+    README/docs), and docs sign-off. Heaviest item — the only genuinely new bus *feature*.
+
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
     sink makes `dp_rx_valid` write a **full** `rx_cdc` and the block is silently dropped (today the
