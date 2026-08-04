@@ -1,0 +1,105 @@
+# ============================================================================================
+# bridge.upf -- IEEE 1801 (UPF) power intent for ucie_rdi_to_pipe7_mac_bridge
+# --------------------------------------------------------------------------------------------
+# STATUS: authored-and-review-validated, NOT run in this OSS environment.
+#   There is no open-source power-aware simulator here (Verilator/Icarus/Yosys do not model
+#   UPF supply/isolation/retention/corruption semantics). This file is consumed by a commercial
+#   power-aware flow -- VCS NLP (`vcs -upf bridge.upf ...`), Questa PA, or Xcelium -- driven by
+#   test/upf/tb_pipe7_upf_power.sv. See test/upf/README.md and docs/power_intent.md.
+#
+# SCOPE / BINDING: this file is applied at the power-aware testbench top
+#   (tb_pipe7_upf_power), which instantiates:
+#       dut : ucie_rdi_to_pipe7_mac_bridge   (the IP under power management)
+#       pmu : pipe7_pmu                       (DV-only power sequencer; drives the controls below)
+#   The bridge RTL is scope-locked and has no power-control ports, so the switch/isolation/
+#   retention control signals come from the sibling `pmu` instance (standard for an authored
+#   power TB). Load e.g. with `load_upf bridge.upf -scope tb_pipe7_upf_power`.
+#
+# POWER ARCHITECTURE (see docs/power_intent.md for rationale):
+#   PD_AON  always-on : control FSM (ctrl) + message-bus master (mbus) + top glue. Must stay
+#                       alive through P1/P2 to sequence the PowerDown/Rate/Width handshakes that
+#                       bring the link back up.
+#   PD_DP   switchable: the whole TX/RX datapath (ingress, tx_cdc, framer/deframer/gearbox
+#                       datapath, rx_burst, rx_cdc, egress) -- gated off in P1/P2 where the PIPE
+#                       link carries no data. The config register file (rf) also sits in PD_DP but
+#                       is RETAINED, so programmed PHY-Tx-Control / PAM4RestrictedLevels values
+#                       survive a low-power episode without paying always-on leakage for the bank.
+# ============================================================================================
+
+upf_version 2.1
+
+set_scope .
+
+# ---------------------------------------------------------------------------- supply nets
+create_supply_port VDD
+create_supply_port VSS
+create_supply_net  VDD
+create_supply_net  VSS
+create_supply_net  VDD_DP           ;# switchable datapath rail (power-switch output)
+connect_supply_net VDD -ports VDD
+connect_supply_net VSS -ports VSS
+
+# ---------------------------------------------------------------------------- power domains
+# PD_AON: the whole DUT instance is the always-on extent; PD_DP (below) extracts the datapath.
+create_power_domain PD_AON -elements {dut}
+create_power_domain PD_DP  -elements {dut/ingress dut/tx_cdc dut/datapath \
+                                      dut/rx_burst dut/rx_cdc dut/egress dut/rf}
+
+# ---------------------------------------------------------------------------- supply sets
+create_supply_set SS_AON -function {power VDD}    -function {ground VSS}
+create_supply_set SS_DP  -function {power VDD_DP} -function {ground VSS}
+associate_supply_set SS_AON -handle PD_AON.primary
+associate_supply_set SS_DP  -handle PD_DP.primary
+
+# ---------------------------------------------------------------------------- power switch
+# Gate VDD_DP from VDD under pmu/dp_pwr_en (1 = ON). Ordering vs isolation/retention is handled
+# by the PMU sequence (isolate+save before this drops; this rises before restore+de-isolate).
+create_power_switch sw_dp \
+    -domain PD_DP \
+    -output_supply_port {vout VDD_DP} \
+    -input_supply_port  {vin  VDD} \
+    -control_port       {sw_on pmu/dp_pwr_en} \
+    -on_state  {ON  vin {sw_on}} \
+    -off_state {OFF {!sw_on}}
+
+# ---------------------------------------------------------------------------- isolation
+# When PD_DP is off, every datapath output crossing into PD_AON / the chip boundary must be
+# clamped so no floating/corrupt value propagates. Default clamp is 0; TxElecIdle is the
+# exception -- it clamps HIGH so the PHY sees asserted electrical idle while the datapath is down.
+set_isolation iso_dp \
+    -domain PD_DP \
+    -isolation_supply_set SS_AON \
+    -clamp_value 0 \
+    -isolation_signal pmu/dp_iso_en -isolation_sense high \
+    -applies_to outputs \
+    -exclude_elements {dut/tx_elec_idle}
+
+set_isolation iso_dp_ei \
+    -domain PD_DP \
+    -isolation_supply_set SS_AON \
+    -clamp_value 1 \
+    -isolation_signal pmu/dp_iso_en -isolation_sense high \
+    -elements {dut/tx_elec_idle}
+
+# ---------------------------------------------------------------------------- retention
+# The config register file must survive P1/P2 (programmed Tx-eq presets / PAM4RestrictedLevels).
+# Balloon latches sit on the always-on rail (SS_AON) so they hold while VDD_DP collapses.
+set_retention ret_cfg \
+    -domain PD_DP \
+    -retention_supply_set SS_AON \
+    -save_signal    {pmu/dp_ret_save    high} \
+    -restore_signal {pmu/dp_ret_restore high} \
+    -elements {dut/rf}
+
+# ---------------------------------------------------------------------------- power state table
+# Legacy PST form (broadly readable). Maps the PIPE PowerDown groups to rail states:
+#   P0 / P0s : datapath powered      -> VDD_DP ON
+#   P1 / P2  : datapath gated        -> VDD_DP OFF
+# (SS_AON / VDD is ON in every state.)
+add_port_state VDD        -state {ON  0.80}
+add_port_state VSS        -state {ON  0.00}
+add_port_state sw_dp/vout -state {ON  0.80} -state {OFF off}
+
+create_pst    bridge_pst -supplies {VDD VDD_DP VSS}
+add_pst_state P0_P0s -pst bridge_pst -state {ON ON  ON}
+add_pst_state P1_P2  -pst bridge_pst -state {ON OFF ON}

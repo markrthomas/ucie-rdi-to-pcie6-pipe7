@@ -101,6 +101,18 @@ coverage model are documented in `docs/uvm_verification.md`. Authored-and-review
 VCS in the OSS environment); the DUT wiring (`test/uvm/pipe7_mac_dut.sv`) is Verilator-lint clean
 via `make lint`.
 
+### Power-aware (UPF) — `test/upf/`
+
+IEEE-1801 power intent for the bridge: an always-on control domain (`PD_AON`: control FSM +
+message-bus master) and a switchable datapath domain (`PD_DP`: ingress/CDC/framer-deframer/egress,
+gated off in P1/P2) with a power switch, output isolation (data→0, `TxElecIdle`→1), and retention
+on the config register file. `test/upf/tb_pipe7_upf_power.sv` drives a P0→P2→P0 episode and checks
+isolation clamps while gated, control-plane liveness, and config retention across the OFF window.
+**Authored-and-review-validated (VCS `-upf`), not in the OSS gate** — no open-source simulator
+models UPF power semantics. The same TB builds under Verilator as a skeleton (`make verilator_upf`,
+in `regress`) that keeps the RTL/TB wiring green without exercising power intent. Architecture and
+rationale: `docs/power_intent.md`.
+
 ## Coverage
 
 - **Line coverage** (`make coverage_merge` → `coverage.info`; `make coverage_summary`): the

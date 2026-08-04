@@ -227,6 +227,8 @@ help:
 	@echo "                         Tier 1b PyUVM-on-Cocotb cross-checks (datapath+ctrl+msgbus)"
 	@echo "  make uvm               VCS/UVM compile+run (test/uvm; not in OSS CI)"
 	@echo "  make uvm_compile | uvm_run | uvm_pdf"
+	@echo "  make upf               VCS -upf power-aware run (test/upf; authored, not in OSS CI)"
+	@echo "  make verilator_upf     OSS UPF skeleton: elaboration + control/PMU/data (no power intent)"
 	@echo ""
 	@echo "Metrics & reporting:"
 	@echo "  make report            regress+coverage+formal+cocotb+fcov -> report/{metrics.json,report.md,report.html}"
@@ -258,7 +260,7 @@ regress_all: ci
 # Pin the randomized rnd_* TBs to seed 0 for a deterministic gate (target-specific SEED,
 # inherited by the prerequisites); standalone runs + waves keep the SEED?=49 default.
 regress: SEED := 0
-regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ verilator_rnd_data verilator_rnd_data_err verilator_rnd_nondata_err verilator_rnd_all
+regress: lint verilator verilator_ctrl verilator_msgbus verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_assn verilator_integ verilator_upf verilator_rnd_data verilator_rnd_data_err verilator_rnd_nondata_err verilator_rnd_all
 
 # Full local confidence run (heavier than CI's first gate).
 ci: regress regress_cov regress_nl1 coverage_summary docs_check
@@ -674,6 +676,37 @@ uvm: uvm_compile uvm_run
 uvm_pdf docs_pdf:
 	$(UVM_MAKE) pdf
 
+# ============================ UPF (power intent) ============================
+# Power-aware verification of the switchable datapath domain (PD_DP): power switch, output
+# isolation, config-regfile retention across a PIPE P0<->P2 episode. See docs/power_intent.md
+# and test/upf/README.md.
+#   * verilator_upf : OSS SKELETON -- builds the power-aware TB WITHOUT UPF semantics; proves the
+#                     DUT+PMU+TB elaborate and the control/PMU/data flow works. Does NOT exercise
+#                     power intent (no OSS power-aware simulator). Wired into `regress` so the SV
+#                     stays green as the RTL evolves.
+#   * upf           : real power-aware sign-off via VCS -upf (test/upf/Makefile.vcs) --
+#                     authored-and-review-validated, NOT run in this OSS env.
+UPF_FILES = $(BRIDGE_RTL) $(BRIDGE_STUBS) test/pipe7_mac_bridge_assertions.sv \
+            test/upf/pipe7_pmu.sv test/upf/tb_pipe7_upf_power.sv
+UPF_TOP = tb_pipe7_upf_power
+UPF_DIR = obj_dir_upf
+
+verilator_upf:
+	@echo "========== Verilator UPF skeleton (elaboration + control/PMU/data; NOT power intent) =========="
+	$(VERILATOR) --binary --timing --assert -Isrc -Wno-STMTDLY -Wno-UNUSEDSIGNAL -Wno-WIDTH --top-module $(UPF_TOP) --Mdir $(UPF_DIR) -o upf_sim $(UPF_FILES)
+	./$(UPF_DIR)/upf_sim
+
+upf:
+	@if command -v vcs >/dev/null 2>&1; then \
+		$(MAKE) -C test/upf -f Makefile.vcs; \
+	else \
+		echo "[UPF] vcs not found -- the power-aware (UPF) run is authored-and-review-validated, not run in this OSS env."; \
+		echo "      No open-source power-aware simulator models UPF isolation/retention/corruption."; \
+		echo "      Files: test/upf/{bridge.upf,pipe7_pmu.sv,tb_pipe7_upf_power.sv,Makefile.vcs}; docs/power_intent.md."; \
+		echo "      OSS skeleton (elaboration + control/PMU/data, no power intent): make verilator_upf"; \
+		exit 0; \
+	fi
+
 # ============================ Formal ============================
 # SymbiYosys formal proofs in verification/formal/ (CDC buffer + credit FC + gearbox + data-phase).
 formal:
@@ -715,6 +748,10 @@ docs_check:
 	@# Phase H (item 49): the docs must record the randomized waveform suite.
 	@grep -q "Randomized waveform tests" docs/verification_plan.md || { echo "docs_check: verification_plan.md must document the randomized waveform suite (items 46-49)"; exit 1; }
 	@grep -q "rnd_all" docs/verification_plan.md README.md || { echo "docs_check: docs must list the rnd_* waveform tests (item 49)"; exit 1; }
+	@# Power intent (UPF): the docs must record the authored-not-run power-aware tier.
+	@test -f docs/power_intent.md || { echo "docs_check: docs/power_intent.md (UPF power intent) is required"; exit 1; }
+	@test -f test/upf/bridge.upf || { echo "docs_check: test/upf/bridge.upf (UPF power intent) is required"; exit 1; }
+	@grep -qi "authored-and-review-validated" docs/power_intent.md || { echo "docs_check: power_intent.md must mark the UPF tier authored-and-review-validated (not run in OSS)"; exit 1; }
 	@echo "Documentation check passed"
 
 # ============================ Vendor simulators ============================

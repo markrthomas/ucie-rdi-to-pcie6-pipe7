@@ -69,6 +69,12 @@ Three-tier (see `docs/verification_plan.md`):
   `make fcov` (`cocotb_coverage`, **45/45 = 100%** bins).
 - **Tier 2 — UVM (VCS/UVM 1.2) is authored-and-review-validated, NOT run here** — no VCS in
   this environment. Validate UVM by review; the Verilator gate is what actually runs.
+- **Power-aware (UPF) — `test/upf/`, authored-and-review-validated, NOT run here.** IEEE-1801
+  power intent (always-on ctrl/msgbus `PD_AON` + switchable datapath `PD_DP` with power switch,
+  isolation, and config-regfile retention) + a P0→P2→P0 power-aware test. No OSS tool models UPF
+  semantics; the real run is `make upf` (VCS `-upf`). `make verilator_upf` builds the same TB as a
+  skeleton (elaboration + control/PMU/data, no power intent) and IS in `regress`. Docs:
+  `docs/power_intent.md`.
 - **Formal:** `make formal` (SymbiYosys; CDC multiclock, RDI credit FC, gearbox bounds,
   deframer guard on real RTL via yosys-slang). **Report:** `make report` → `report/`.
 

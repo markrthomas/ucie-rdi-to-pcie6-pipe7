@@ -1,0 +1,39 @@
+# ============================================================================================
+# test/upf/Makefile.vcs -- power-aware (UPF) run of the bridge under Synopsys VCS NLP.
+#
+# STATUS: authored-and-review-validated, NOT run in this OSS environment (no VCS / power-aware
+# simulator here). Mirrors the Tier-2 UVM convention: this is the VCS-only growth path; the
+# open-source gate lives in the top Makefile. Adapt the flags to Questa PA / Xcelium as needed.
+#
+# Requires: VCS with the Native Low Power (NLP) / UPF engine, UVM not required (directed TB).
+# ============================================================================================
+
+RTL = ../../src/pipe7_pkg.sv ../../src/pipe7_mac_ctrl_fsm.sv ../../src/pipe7_msgbus_master.sv \
+      ../../src/pipe7_regfile.sv ../../src/pipe7_rdi_ingress.sv ../../src/pipe7_cdc_elastic_buf.sv \
+      ../../src/pipe7_tx_framer_gb.sv ../../src/pipe7_rx_deframer_gb.sv ../../src/pipe7_gen6_datapath.sv \
+      ../../src/pipe7_mac_datapath_ra.sv ../../src/pipe7_rx_burst_fifo.sv ../../src/pipe7_rdi_egress.sv \
+      ../../src/ucie_rdi_to_pipe7_mac_bridge.sv
+
+TB  = ../pipe7_phy_responder_stub.sv ../pipe7_msgbus_responder_stub.sv \
+      ../pipe7_mac_bridge_assertions.sv pipe7_pmu.sv tb_pipe7_upf_power.sv
+
+TOP  = tb_pipe7_upf_power
+UPF  = bridge.upf
+
+# -upf applies the power intent; +define+UPF_POWER_AWARE arms the isolation/retention checks in
+# the TB. -power=UPF enables corruption/isolation/retention modelling in the NLP engine.
+VCS_FLAGS = -full64 -sverilog -timescale=1ns/1ps -assert svaext \
+            -power=UPF -upf $(UPF) +define+UPF_POWER_AWARE
+
+.PHONY: all compile run clean
+all: run
+
+compile:
+	vcs $(VCS_FLAGS) -top $(TOP) $(RTL) $(TB) -o simv_upf -l compile.log
+
+run: compile
+	./simv_upf -l run.log
+	@grep -q "\[UPF POWER\] PASS" run.log && echo "UPF power-aware: PASS" || { echo "UPF power-aware: FAIL"; exit 1; }
+
+clean:
+	rm -rf simv_upf* csrc *.log *.vpd *.fsdb ucli.key DVEfiles AN.DB
