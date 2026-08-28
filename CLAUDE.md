@@ -84,3 +84,11 @@ Three-tier (see `docs/verification_plan.md`):
 
 - End commit messages with: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
 - Only commit/push when asked. Branch off `main` if the user wants a PR.
+
+## UVM on open-source Verilator — TODO (blocked)
+
+A license-free UVM-on-Verilator port (like the sibling bridge repos: a
+`.../vlt` Makefile + a GitHub Actions workflow that builds Verilator 5.050 +
+installs **z3** for `randomize()`, then lint + a `--binary` smoke) is planned
+but **blocked** on Verilator-incompatible source. See the "OSS Verilator UVM
+port" task in `PLAN.md` for the specific blockers and the exact recipe.
