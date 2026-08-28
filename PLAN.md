@@ -642,3 +642,30 @@ lint-clean, `make regress` green each commit; commit only when asked.
 PHY internals (SerDes, PAM4 precoding math, CDR, elec-idle detection); FEC/flit-LCRC codec
 (controller-side); Gen1–4 legacy rates; the predecessor's demo CRC (`0x17047432` residue) —
 it is unrelated to Gen6 flit CRC and is dropped from the PIPE interface entirely.
+
+## Task — OSS Verilator UVM port (license-free CI) — BLOCKED, needs refactor
+
+**Added 2026-08-28.** Goal: run the UVM env (`test/uvm`) under open-source
+Verilator 5.050 (+ bundled Accellera UVM) in CI — a license-free path matching
+the sibling bridge repos. Pattern: `test/uvm/vlt/` (Makefile + empty
+`uvm_macros.svh` include-shim) + a GitHub Actions workflow that builds Verilator
+from source, installs **z3** (Verilator's SMT solver for `randomize()`; without
+it constrained randomize returns 0) and `ccache`, then `--lint-only` + a
+`--binary` smoke run of `pipe7_full_test`.
+
+**Blocked on Verilator-incompatible structure (Xcelium tolerates, Verilator rejects):**
+- **Clocking block referenced from a modport:** the interfaces
+  (`ucie_rdi_if`, `pipe7_ctrl_if`, `pipe7_msgbus_if`, `pipe7_gen6_rx_if`) declare
+  `modport (clocking src_cb, ...)` and Verilator reports `Modport item not found:
+  'src_cb'` etc. Verilator's clocking-block-in-modport support is incomplete;
+  the driver/monitor use `vif.<cb>.<sig>`, so this needs an interface rework
+  (e.g. drive/sample through explicit modport signals, or guard the clocking
+  modport under `` `ifndef VERILATOR ``).
+- **Forward class references in `pipe7_mac_pkg`:** the coverage subscribers
+  (`pipe7_ctrl_coverage` ~L295, `pipe7_msgbus_coverage` ~L327) reference
+  `ctrl_transaction` / `msgbus_transaction` which are declared later (~L409+).
+  Verilator requires declaration-before-use — reorder so the transaction classes
+  precede the coverage classes (or add typedef forward declarations).
+
+**Exit:** `make -C test/uvm/vlt lint` clean, then a `--binary` smoke reaching a
+clean `$finish` with `UVM_ERROR==0 && UVM_FATAL==0` in CI.
