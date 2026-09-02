@@ -11,11 +11,11 @@ control/status), supporting **Gen5 (32 GT/s, 128b/130b)** and **Gen6 (64 GT/s, P
 ## Status
 
 Integrated IP complete. Execution followed [`PLAN.md`](PLAN.md) as a phased closure plan, one
-numbered item per commit. **Item 0 (spec cross-check)** reconciled every placeholder constant
-against the controlled Intel PIPE 7.1 specification; the cores (items 1–15) and the **integrated
-bridge + all-tier verification** (items 16–25: full-width gearbox, rate-aware datapath, credit-
-based UCIe RDI, RDI↔PCLK CDC, the integrated `ucie_rdi_to_pipe7_mac_bridge` top, and the
-Verilator / PyUVM / UVM / formal tiers) are delivered, with the Verilator gate green per commit.
+numbered item per commit. **Items 0–50 are delivered:** the controlled-spec cross-check; cores;
+the integrated bridge; correctness guards and formal-on-real-RTL; performance reporting; 98.34%
+DUT line-coverage closure; independent functional coverage; randomized waveform tests; and
+power-aware (UPF) verification collateral. The open-source Verilator gate is green per commit.
+**Phase J (items 51–54)**, a realistic bidirectional PIPE 7.1 register loop, is planned.
 
 ## Scope
 
@@ -120,7 +120,7 @@ flowchart TB
 | Formal proofs | SymbiYosys (BMC + cover) | **8 / 8 pass** |
 | PyUVM cross-checks | cocotb (Verilator + Icarus) | **5 / 5 pass** |
 
-Two-tier, mirroring the predecessor's methodology:
+Three-tier verification, mirroring the predecessor's methodology:
 
 - **Verilator** — open-source CI gate (`make regress`): lint + the integrated-bridge end-to-end
   smoke (RDI round-trip + control + message bus, assertions bound) plus per-block self-checking
