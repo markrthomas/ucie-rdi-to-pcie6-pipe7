@@ -536,6 +536,32 @@ lint-clean, `make regress` green each commit; commit only when asked.
     DUT line-coverage / fcov numbers** (updating the `docs_check` `651/662` and `45/45` guards +
     README/docs), and docs sign-off. Heaviest item — the only genuinely new bus *feature*.
 
+**Phase K — post-register-loop hardening (planned; ordered by implementation-token efficiency).**
+These items follow Phase J in the order that delivers the most incremental design confidence per
+implementation and verification effort. Keep one numbered item per commit and preserve the
+Verilator, PyUVM/Cocotb, Icarus functional-coverage, and formal gates.
+
+55. **Runtime sub-width lane selection.** Implement `Width`/`RxWidth` selection of the low N
+    active lanes within the compile-time `PIPE_WIDTH`, while keeping inactive TX lanes electrically
+    idle and ignoring their RX data. Apply the mask consistently in
+    `pipe7_mac_datapath_ra` and the integrated top; add PIPE assertions plus Gen5/Gen6 directed
+    and randomized width-transition tests. Cover all supported active widths without changing the
+    full-physical-width default.
+56. **Expand formal proofs on real RTL.** Incrementally bind the remaining re-modeled cores
+    (`pipe7_cdc_elastic_buf`, ingress/egress credit FC, `pipe7_tx_framer_gb`, and
+    `pipe7_mac_datapath_ra`) to their shipped SystemVerilog implementations through
+    yosys-slang. Preserve the existing proof properties and assumptions; add only the minimal
+    tool-compatible wrappers or immediate assertions necessary to prove the real modules. Keep
+    each migrated proof independently runnable and document any frontend limitation that prevents
+    a faithful binding.
+57. **OSS Verilator UVM port (license-free CI).** Make `test/uvm/` runnable under Verilator 5.050
+    with bundled Accellera UVM: refactor the interface clocking-modport dependency so drivers and
+    monitors can use portable explicit signals (or guarded clocking blocks), reorder or forward-
+    declare the transaction classes before the coverage subscribers, then add `test/uvm/vlt/`
+    (Makefile plus `uvm_macros.svh` shim). Add a CI job that builds Verilator with `z3` and
+    `ccache`, runs `--lint-only`, and runs a `--binary` `pipe7_full_test` smoke. Exit only when
+    the smoke reaches `$finish` with `UVM_ERROR==0 && UVM_FATAL==0`.
+
 26. **RX overflow handling.** In `ucie_rdi_to_pipe7_mac_bridge.sv` the RX CDC `rxc_wr_full` /
     `rxc_wr_ready` are lint-waived unused: the deframer cannot backpressure the PHY, so a slow RDI
     sink makes `dp_rx_valid` write a **full** `rx_cdc` and the block is silently dropped (today the
@@ -567,7 +593,7 @@ lint-clean, `make regress` green each commit; commit only when asked.
     is compile-parameterized end-to-end (item-29 smokes at 80 and 160). *Deferred:* **runtime**
     sub-width lane selection (using `Width`/`RxWidth` to drive only the low N lanes within
     `PIPE_WIDTH`) is a datapath refinement (`pipe7_mac_datapath_ra` runs at the physical width) —
-    tracked here for a follow-on.
+    tracked as item 55.
 
 **Tier 3 — verification fidelity**
 
@@ -577,7 +603,7 @@ lint-clean, `make regress` green each commit; commit only when asked.
     re-model). `make formal` now runs six proofs. yosys-slang supports immediate assertions (not
     concurrent SVA); the `int`-typed combinational modules (gearbox) and the assume-guarantee
     credit loop translate more reliably as `reg`-typed re-models, so those keep their re-models —
-    re-targeting the remainder is a follow-on as slang coverage/idioms firm up.
+    re-targeting the remainder is item 56.
 32. **True dual-clock CDC formal + reset synchronization.** The `fifo_cdc` proof ties
     `wr_clk==rd_clk` (proves storage/flag consistency, not metastability-safe crossing). *Deliver:*
     multi-clock formal, CDC/SDC constraints, and a reset-synchronization review of async `rst_n`
@@ -642,30 +668,3 @@ lint-clean, `make regress` green each commit; commit only when asked.
 PHY internals (SerDes, PAM4 precoding math, CDR, elec-idle detection); FEC/flit-LCRC codec
 (controller-side); Gen1–4 legacy rates; the predecessor's demo CRC (`0x17047432` residue) —
 it is unrelated to Gen6 flit CRC and is dropped from the PIPE interface entirely.
-
-## Task — OSS Verilator UVM port (license-free CI) — BLOCKED, needs refactor
-
-**Added 2026-08-28.** Goal: run the UVM env (`test/uvm`) under open-source
-Verilator 5.050 (+ bundled Accellera UVM) in CI — a license-free path matching
-the sibling bridge repos. Pattern: `test/uvm/vlt/` (Makefile + empty
-`uvm_macros.svh` include-shim) + a GitHub Actions workflow that builds Verilator
-from source, installs **z3** (Verilator's SMT solver for `randomize()`; without
-it constrained randomize returns 0) and `ccache`, then `--lint-only` + a
-`--binary` smoke run of `pipe7_full_test`.
-
-**Blocked on Verilator-incompatible structure (Xcelium tolerates, Verilator rejects):**
-- **Clocking block referenced from a modport:** the interfaces
-  (`ucie_rdi_if`, `pipe7_ctrl_if`, `pipe7_msgbus_if`, `pipe7_gen6_rx_if`) declare
-  `modport (clocking src_cb, ...)` and Verilator reports `Modport item not found:
-  'src_cb'` etc. Verilator's clocking-block-in-modport support is incomplete;
-  the driver/monitor use `vif.<cb>.<sig>`, so this needs an interface rework
-  (e.g. drive/sample through explicit modport signals, or guard the clocking
-  modport under `` `ifndef VERILATOR ``).
-- **Forward class references in `pipe7_mac_pkg`:** the coverage subscribers
-  (`pipe7_ctrl_coverage` ~L295, `pipe7_msgbus_coverage` ~L327) reference
-  `ctrl_transaction` / `msgbus_transaction` which are declared later (~L409+).
-  Verilator requires declaration-before-use — reorder so the transaction classes
-  precede the coverage classes (or add typedef forward declarations).
-
-**Exit:** `make -C test/uvm/vlt lint` clean, then a `--binary` smoke reaching a
-clean `$finish` with `UVM_ERROR==0 && UVM_FATAL==0` in CI.

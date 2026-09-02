@@ -15,7 +15,14 @@ numbered item per commit. **Items 0–50 are delivered:** the controlled-spec cr
 the integrated bridge; correctness guards and formal-on-real-RTL; performance reporting; 98.34%
 DUT line-coverage closure; independent functional coverage; randomized waveform tests; and
 power-aware (UPF) verification collateral. The open-source Verilator gate is green per commit.
-**Phase J (items 51–54)**, a realistic bidirectional PIPE 7.1 register loop, is planned.
+
+Remaining planned updates:
+
+- **Phase J (items 51–54):** realistic, attribute-aware PHY and MAC register maps with a
+  bidirectional M2P/P2M register loop.
+- **Item 55:** runtime `Width`/`RxWidth` sub-width lane selection within `PIPE_WIDTH`.
+- **Item 56:** migrate the remaining formal proofs from re-models to shipped RTL.
+- **Item 57:** license-free UVM-on-Verilator smoke and CI gate.
 
 ## Scope
 
