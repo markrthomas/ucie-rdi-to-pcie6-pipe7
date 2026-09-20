@@ -184,3 +184,7 @@ verification plan.
   GTKWave with the saved [`waves/<tb>.gtkw`](waves/) signal layout. `SEED` selects the random seed
   for the `rnd_*` tests.
 - `make ci` — the full local run (regress + coverage + NL1 + docs check).
+
+See [`DV_STANDARDS.md`](DV_STANDARDS.md) for the `make`-target convention shared across this
+maintainer's RTL/DV repos; hyphenated aliases (e.g. `regress-cov`, `docs-check`) exist alongside
+this repo's existing underscore-named targets.
