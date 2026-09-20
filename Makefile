@@ -5,6 +5,7 @@
 
 .PHONY: all check ci clean cocotb cocotb_icarus fcov coverage coverage_merge coverage_summary docs_check docs_pdf formal report report_check \
         gtkwave help lint nl1 quick regress regress_all regress_cov regress_nl1 repo_status \
+        coverage-summary coverage-merge regress-cov regress-nl1 regress-all report-check docs-check repo-status \
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
         verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
         verilator_rnd_data verilator_rnd_data_err verilator_rnd_nondata_err verilator_rnd_all \
@@ -243,6 +244,10 @@ help:
 	@echo "  make clean             remove all build artifacts"
 	@echo ""
 	@echo "  Variables: WAVE_TB (waveform TB), COCOTB_SIM, VERILATOR, SEED, FCOV_MIN"
+	@echo ""
+	@echo "  See DV_STANDARDS.md for the cross-repo target convention. Hyphenated aliases"
+	@echo "  (coverage-summary, coverage-merge, regress-cov, regress-nl1, regress-all,"
+	@echo "  report-check, docs-check, repo-status) exist alongside the underscore names."
 
 # ============================ Workflow aliases ============================
 all: verilator
@@ -254,6 +259,16 @@ nl1: regress_nl1
 sim: verilator                 # DV_STANDARDS: sim = Verilator OSS sim
 coverage: regress_cov          # alias for Verilator line coverage
 regress_all: ci
+
+# DV_STANDARDS.md hyphenated aliases (additive; underscore originals unchanged).
+coverage-summary: coverage_summary
+coverage-merge: coverage_merge
+regress-cov: regress_cov
+regress-nl1: regress_nl1
+regress-all: regress_all
+report-check: report_check
+docs-check: docs_check
+repo-status: repo_status
 
 # ============================ Gates ============================
 # Release regression (lint + every Verilator smoke); CI runs this.
