@@ -143,7 +143,11 @@ UVM_MAKE = $(MAKE) -C test/uvm -f Makefile.vcs
 # Pick the TB with WAVE_TB; each maps to its existing file list / top and an optional
 # per-TB extra arg. TBs dump when built with +define+ENABLE_WAVES (--trace); the VCD path
 # is passed at run time via +wavefile so the Makefile owns the output location.
-WAVE_TB   ?= framing
+# Default is the Phase H randomized data test (tb_pipe7_rnd_data, item 46): seeded random
+# RDI traffic (40-80 blocks/run, well above a minimum viable transaction count), self-checking,
+# assertions bound -- so `make waves`/`make gtkwave` with no WAVE_TB is a random-transaction
+# test out of the box, not a fixed directed one.
+WAVE_TB   ?= rnd_data
 WAVE_DIR   = obj_dir_waves
 WAVE_VCD   = waves/$(WAVE_TB).vcd
 WAVE_GTKW  = waves/$(WAVE_TB).gtkw
