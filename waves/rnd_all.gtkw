@@ -55,11 +55,11 @@ tb_pipe7_rnd_all.mb_rsp_error
 @200
 -Scoreboard
 @23
-tb_pipe7_rnd_all.data_ok
-tb_pipe7_rnd_all.sync_err_seen
-tb_pipe7_rnd_all.ovf_seen
-tb_pipe7_rnd_all.rejects
-tb_pipe7_rnd_all.ctrl_wds
-tb_pipe7_rnd_all.mb_wds
+tb_pipe7_rnd_all.data_ok[31:0]
+tb_pipe7_rnd_all.sync_err_seen[31:0]
+tb_pipe7_rnd_all.ovf_seen[31:0]
+tb_pipe7_rnd_all.rejects[31:0]
+tb_pipe7_rnd_all.ctrl_wds[31:0]
+tb_pipe7_rnd_all.mb_wds[31:0]
 [pattern_trace] 1
 [pattern_trace] 0

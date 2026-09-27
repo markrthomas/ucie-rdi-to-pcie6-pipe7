@@ -183,6 +183,9 @@ verification plan.
   — build+run a testbench with tracing to `waves/<tb>.vcd`; `make gtkwave WAVE_TB=...` opens it in
   GTKWave with the saved [`waves/<tb>.gtkw`](waves/) signal layout. `SEED` selects the random seed
   for the `rnd_*` tests.
+- `make wave [WAVE_TB=...] [SEED=N]` — one random test end to end: `rnd_data` by default with a
+  fresh random seed each run (printed; `SEED=N` replays), dumped and opened in GTKWave zoomed to
+  fit. The old datapath-smoke viewer is now `make wave-bridge`.
 - `make ci` — the full local run (regress + coverage + NL1 + docs check).
 
 See [`DV_STANDARDS.md`](DV_STANDARDS.md) for the `make`-target convention shared across this

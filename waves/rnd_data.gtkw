@@ -50,8 +50,8 @@ tb_pipe7_rnd_data.rdi_rx_crd[1:0]
 @200
 -Scoreboard
 @23
-tb_pipe7_rnd_data.sent
-tb_pipe7_rnd_data.recv
-tb_pipe7_rnd_data.rdi_errors
+tb_pipe7_rnd_data.sent[31:0]
+tb_pipe7_rnd_data.recv[31:0]
+tb_pipe7_rnd_data.rdi_errors[31:0]
 [pattern_trace] 1
 [pattern_trace] 0
