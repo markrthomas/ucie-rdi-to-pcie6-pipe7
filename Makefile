@@ -9,7 +9,7 @@
         sim simv smoke test uvm uvm_compile uvm_pdf uvm_run verilator verilator_assn \
         verilator_cov verilator_ctrl verilator_debug verilator_framing verilator_framing_gb verilator_deframer_ovf verilator_deframer_gb_ovf verilator_timeout verilator_burst verilator_bridge_w160 verilator_bridge_cov verilator_rate_dp verilator_rdi verilator_cdc verilator_gen6 verilator_integ \
         verilator_rnd_data verilator_rnd_data_err verilator_rnd_nondata_err verilator_rnd_all \
-        verilator_msgbus verilator_nl1 vivado wave waves xsim questa
+        verilator_msgbus verilator_nl1 vivado wave wave-bridge waves xsim questa
 
 VERILATOR ?= $(shell command -v verilator_bin 2>/dev/null || command -v verilator 2>/dev/null)
 VERILATOR_ROOT := $(shell if [ -n "$(VERILATOR)" ]; then realpath "$$(dirname "$(VERILATOR)")/../share/verilator"; fi)
@@ -154,6 +154,9 @@ WAVE_GTKW  = waves/$(WAVE_TB).gtkw
 WAVE_EXTRA =
 # Phase H: seed for the randomized rnd_* TBs (fixed default -> deterministic; override e.g. SEED=7).
 SEED      ?= 49
+# `make wave` is a random run: a fresh seed each time unless SEED=<n> is given
+# on the command line / environment (the seed is printed so a run can be replayed).
+WAVE_SEED := $(if $(filter command line environment,$(origin SEED)),$(SEED),$(shell echo $$(( $$(od -An -N4 -tu4 /dev/urandom) % 2147483646 + 1 ))))
 ifeq ($(WAVE_TB),ctrl)
     WAVE_FILES = $(CTRL_FILES)
     WAVE_TOP   = $(CTRL_TOP)
@@ -219,7 +222,10 @@ help:
 	@echo "                         build+run the TB with --trace -> waves/<tb>.vcd"
 	@echo "  make gtkwave [WAVE_TB=...]"
 	@echo "                         waves, then open GTKWave with the waves/<tb>.gtkw layout"
-	@echo "  make wave              open GTKWave on the datapath VCD (obj_dir/dump.vcd)"
+	@echo "  make wave [WAVE_TB=...] [SEED=N]"
+	@echo "                         random run (fresh SEED unless given) -> waves/<tb>.vcd,"
+	@echo "                         then GTKWave with the waves/<tb>.gtkw layout, zoomed to fit"
+	@echo "  make wave-bridge       open GTKWave on the datapath smoke VCD (make verilator_debug first)"
 	@echo ""
 	@echo "Coverage & parameter smokes:"
 	@echo "  make coverage          Verilator line coverage -> coverage.info (alias: regress_cov)"
@@ -591,7 +597,8 @@ verilator_debug:
 # ============================ Waveforms ============================
 # waves: build the selected self-clocking TB with tracing (+define+ENABLE_WAVES arms the
 # TB's $dumpvars) and run it, writing waves/<tb>.vcd. gtkwave then opens it with the saved
-# waves/<tb>.gtkw signal layout. `wave` (singular) is the legacy datapath-smoke VCD viewer.
+# waves/<tb>.gtkw signal layout. `wave` does the same with a fresh random SEED and a
+# zoom-to-fit (waves/zoom_full.tcl); `wave-bridge` is the legacy datapath-smoke VCD viewer.
 waves:
 	@if [ -z "$(VERILATOR)" ] || [ -z "$(VERILATOR_ROOT)" ]; then echo "ERROR: install verilator or ensure verilator_bin is on PATH"; exit 1; fi
 	@mkdir -p waves
@@ -609,15 +616,22 @@ gtkwave: waves
 	fi; \
 	if [ -f $(WAVE_GTKW) ]; then \
 		echo "[GTKWAVE] opening $(WAVE_VCD) with layout $(WAVE_GTKW)"; \
-		gtkwave $(WAVE_VCD) $(WAVE_GTKW) & \
+		gtkwave -S waves/zoom_full.tcl $(WAVE_VCD) $(WAVE_GTKW) & \
 	else \
 		echo "[GTKWAVE] no saved layout $(WAVE_GTKW); opening $(WAVE_VCD)"; \
-		gtkwave $(WAVE_VCD) & \
+		gtkwave -S waves/zoom_full.tcl $(WAVE_VCD) & \
 	fi
 
-# Legacy: open GTKWave on the bridge debug VCD (make verilator_debug first).
+# One random test end to end: build + run WAVE_TB (default rnd_data) with a fresh
+# random seed (SEED=<n> to replay), dump waves/<tb>.vcd, open it in GTKWave with
+# the saved waves/<tb>.gtkw layout zoomed to fit.
 wave:
-	@echo "Opening GTKWave on $(VERILATOR_DIR)/dump.vcd..."
+	@echo "[WAVE] $(WAVE_TB) with random seed: SEED=$(WAVE_SEED)"
+	@$(MAKE) --no-print-directory gtkwave SEED=$(WAVE_SEED)
+
+# Legacy: open GTKWave on the bridge debug VCD (make verilator_debug first).
+wave-bridge:
+	@echo "Opening GTKWave on $(VERILATOR_DIR)/bridge.vcd..."
 	gtkwave $(VERILATOR_DIR)/bridge.vcd &
 
 # ============================ Lint ============================
