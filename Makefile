@@ -229,6 +229,7 @@ help:
 	@echo ""
 	@echo "Coverage & parameter smokes:"
 	@echo "  make coverage          Verilator line coverage -> coverage.info (alias: regress_cov)"
+	@echo "  make stress            stress / randomized simulation (n/a stub if none)"
 	@echo "  make coverage_summary  print the per-file line-coverage table"
 	@echo "  make nl1               NUM_LANES=1 parameter smoke (alias: regress_nl1)"
 	@echo ""
@@ -824,3 +825,8 @@ clean:
 	rm -rf xsim.dir transcript xsim_*.log
 	rm -rf work *.ucdb
 	@echo "Clean complete"
+
+# Standard DV target (DV_STANDARDS.md)
+.PHONY: stress
+stress:
+	@echo "[STRESS] n/a: no stress/randomized tier in this repo yet (see DV_STANDARDS.md)"
