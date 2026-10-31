@@ -67,3 +67,5 @@ NOTES.md
 .DS_Store
 obj_dir_covmerge/
 report/
+/test/random/runs/
+/docker/last-run-metrics.json
