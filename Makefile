@@ -259,6 +259,9 @@ help:
 	@echo "  See DV_STANDARDS.md for the cross-repo target convention. Hyphenated aliases"
 	@echo "  (coverage-summary, coverage-merge, regress-cov, regress-nl1, regress-all,"
 	@echo "  report-check, docs-check, repo-status) exist alongside the underscore names."
+	@echo "  swarm      Swarm A (verification) via Claude Code; swarm-rr = Swarm B (random regression); swarm-dry = show the command"
+	@echo "  batch      the Railway batch (docker/entrypoint.sh ci); board = swarm status; heavy T=<t> = one heavy target at a time"
+	@echo "  swarm-profile / swarm-kit-check   print .claude/swarm.env / check kit drift (shared kit: markrthomas/dv-swarm-kit)"
 
 # ============================ Workflow aliases ============================
 all: verilator
@@ -830,3 +833,6 @@ clean:
 .PHONY: stress
 stress:
 	@echo "[STRESS] n/a: no stress/randomized tier in this repo yet (see DV_STANDARDS.md)"
+
+# shared swarm/infra targets (markrthomas/dv-swarm-kit)
+include swarm.mk
